@@ -1,0 +1,421 @@
+import { sendWelcome } from './email.js';
+// SignedChange v2: accounts, server-side documents, remote signing, server-side PDF, subscriptions.
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import qrcode from 'qrcode-generator';
+const enc = new TextEncoder();
+export const b64u = buf => { let s = ''; const a = new Uint8Array(buf); for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+export const rand = n => b64u(crypto.getRandomValues(new Uint8Array(n)));
+export async function sha256hex(s) { return [...new Uint8Array(await crypto.subtle.digest('SHA-256', typeof s === 'string' ? enc.encode(s) : s))].map(b => b.toString(16).padStart(2, '0')).join(''); }
+const ID = /^[\w-]{20,40}$/;
+export const FREE_DOCS = 3, FREE_PER_IP_MONTH = 10, NEW_ACCT_PER_IP_DAY = 5, SIGN_DAYS = 14, DOC_TTL = 2 * 365 * 86400;
+const json = (o, s, h) => new Response(JSON.stringify(o), { status: s, headers: h });
+
+async function lock(env, name, body) {
+  const stub = env.GIFT_LOCK.get(env.GIFT_LOCK.idFromName(name));
+  return (await stub.fetch('https://lock/', { method: 'POST', body: JSON.stringify(body) })).json();
+}
+
+// ---------- accounts ----------
+export async function auth(req, env) {
+  const m = /^Bearer ([\w-]{20,40})\.([\w-]{40,60})$/.exec(req.headers.get('Authorization') || '');
+  if (!m) return null;
+  const acct = await env.PAYMENTS.get('acct:' + m[1], 'json');
+  if (!acct) return null;
+  const h = await sha256hex('acct-v1:' + m[2]);
+  if (h.length !== acct.kh.length) return null;
+  let r = 0; for (let i = 0; i < h.length; i++) r |= h.charCodeAt(i) ^ acct.kh.charCodeAt(i);
+  return r === 0 ? { id: m[1], ...acct } : null;
+}
+export async function newAccount(env, ipHash, h) {
+  const day = new Date().toISOString().slice(0, 10);
+  const r = await lock(env, `newacct:${ipHash}:${day}`, { op: 'use', limit: NEW_ACCT_PER_IP_DAY });
+  if (!r.ok) return json({ ok: false, error: 'Too many new accounts from this network today.' }, 429, h);
+  const id = rand(18), key = rand(32);
+  await env.PAYMENTS.put('acct:' + id, JSON.stringify({ kh: await sha256hex('acct-v1:' + key), created: new Date().toISOString(), pro: null }));
+  return json({ ok: true, id, key }, 200, h);
+}
+async function saveAcct(env, a) { const { id, ...rest } = a; await env.PAYMENTS.put('acct:' + id, JSON.stringify(rest)); }
+
+// Pro status is always recomputed from the server-side source of truth (payment / subscription / gift records).
+export async function proStatus(env, acct) {
+  const p = acct && acct.pro;
+  if (!p) return null;
+  if (p.type === 'life') { const t = await env.PAYMENTS.get('txn:' + p.ref, 'json'); return t && !t.revoked && !t.sub ? { plan: 'lifetime' } : null; }
+  if (p.type === 'gift') { const g = await env.PAYMENTS.get(p.ref, 'json'); return g && g.status === 'used' && !g.revoked ? { plan: 'gift' } : null; }
+  if (p.type === 'sub') {
+    const s = await env.PAYMENTS.get('sub:' + p.ref, 'json');
+    if (!s || s.revoked || s.status === 'ended') return null;
+    if ((s.paidThrough || 0) > Date.now()) return { plan: 'monthly', status: s.status, until: new Date(s.paidThrough).toISOString() };
+    return null;
+  }
+  return null;
+}
+export async function grantPro(env, acctId, pro) {
+  if (!acctId || !ID.test(acctId)) return false;
+  const a = await env.PAYMENTS.get('acct:' + acctId, 'json');
+  if (!a) return false;
+  a.pro = pro; await env.PAYMENTS.put('acct:' + acctId, JSON.stringify(a));
+  // post-unlock hook only: welcome email if Pro is really active now (dormant without BREVO_API_KEY)
+  if (env.BREVO_API_KEY && (pro.type === 'life' || pro.type === 'sub')) { try { if (await proStatus(env, { pro })) await sendWelcome(env, acctId, pro); } catch {} }
+  return true;
+}
+
+// ---------- validation ----------
+const clean = (s, max) => String(s == null ? '' : s).replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, '').trim().slice(0, max);
+const cleanLine = (s, max) => clean(s, max).replace(/\n/g, ' ');
+function pngOk(d) {
+  if (typeof d !== 'string' || d.length > 200000 || !d.startsWith('data:image/png;base64,')) return null;
+  try { const bin = atob(d.slice(22)); if (bin.length < 100 || bin.charCodeAt(0) !== 0x89 || bin.slice(1, 4) !== 'PNG') return null;
+    const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return d; } catch { return null; }
+}
+export const MAX_ATT = 3, MAX_ATT_BYTES = 350 * 1024;
+// attachments: JPEG/PNG only, magic bytes checked, size-capped
+export function attOk(d) {
+  if (typeof d !== 'string' || d.length > Math.ceil(MAX_ATT_BYTES * 4 / 3) + 40) return null;
+  const m = /^data:image\/(jpeg|png);base64,([A-Za-z0-9+/=]+)$/.exec(d); if (!m) return null;
+  let bin; try { bin = atob(m[2]); } catch { return null; }
+  if (bin.length < 100 || bin.length > MAX_ATT_BYTES) return null;
+  const jpg = bin.charCodeAt(0) === 0xFF && bin.charCodeAt(1) === 0xD8 && bin.charCodeAt(2) === 0xFF, png = bin.charCodeAt(0) === 0x89 && bin.slice(1, 4) === 'PNG';
+  if (m[1] === 'jpeg' ? !jpg : !png) return null;
+  return { type: m[1], size: bin.length, data: d };
+}
+const DATE = /^\d{4}-\d{2}-\d{2}$/, NUM = /^\d{1,9}([.,]\d{1,2})?$/;
+export const PLACEHOLDER = /\[[^\]\n]{1,60}\]/g;
+const num = s => Math.round(parseFloat(String(s || '0').replace(',', '.')) * 100) / 100;
+const PAY = ['', 'completion', 'net7', 'net14', 'net30', 'custom'];
+export function readFields(b) {
+  const f = b && b.fields || {}, v3 = !!(b && b.v === 3);
+  const o = { biz: clean(f.biz, 120), contact: clean(f.contact, 120), client: clean(f.client, 120), clientContact: clean(f.clientContact, 120), job: clean(f.job, 160),
+    title: clean(f.title, 80) || 'Signed Change Record', desc: clean(f.desc, 3000), price: clean(f.price, 20), currency: clean(f.currency, 8).toUpperCase().replace(/[^A-Z]/g, ''), date: clean(f.date, 10) };
+  if (v3) {
+    Object.assign(o, { bizCo: cleanLine(f.bizCo, 120), bizRole: cleanLine(f.bizRole, 60), clientCo: cleanLine(f.clientCo, 120), clientRole: cleanLine(f.clientRole, 60),
+      priceDir: ['inc', 'dec', 'none'].includes(f.priceDir) ? f.priceDir : 'inc', origAmount: clean(f.origAmount, 20), taxRate: clean(f.taxRate, 8),
+      newDate: clean(f.newDate, 10), daysAdded: clean(f.daysAdded, 5), payTerms: PAY.includes(f.payTerms) ? f.payTerms : '', payCustom: cleanLine(f.payCustom, 120),
+      payMethod: cleanLine(f.payMethod, 80), contractDate: clean(f.contractDate, 10), lang: f.lang === 'fr' ? 'fr' : 'en', lines: [] });
+    if (Array.isArray(f.lines)) {
+      if (f.lines.length > 15) return { error: 'Up to 15 price lines.' };
+      for (const x of f.lines) { const d = cleanLine(x && x.d, 120), a = clean(x && x.a, 20); if (!d && !a) continue;
+        if (!d || !NUM.test(a)) return { error: 'Each price line needs a description and an amount like 120.00.' }; o.lines.push({ d, a }); }
+    }
+    if (o.lines.length) o.price = o.lines.reduce((s, x) => s + num(x.a), 0).toFixed(2);
+    if (o.priceDir === 'none') o.price = o.price || '0';
+    if (o.origAmount && !NUM.test(o.origAmount)) return { error: 'Original contract amount should be a number like 5000.00.', field: 'origAmount' };
+    if (o.taxRate && (!/^\d{1,3}([.,]\d{1,3})?$/.test(o.taxRate) || num(o.taxRate) > 100)) return { error: 'Tax rate should be a percentage between 0 and 100.', field: 'taxRate' };
+    if (o.newDate && !DATE.test(o.newDate)) return { error: 'New completion date is not valid.', field: 'newDate' };
+    if (o.contractDate && !DATE.test(o.contractDate)) return { error: 'Original agreement date is not valid.', field: 'contractDate' };
+    if (o.daysAdded === '') o.daysAdded = '0';
+    if (!/^-?\d{1,4}$/.test(o.daysAdded)) return { error: 'Days added should be a whole number (0 if none).', field: 'daysAdded' };
+    if (o.payTerms === 'custom' && !o.payCustom) return { error: 'Please describe the custom payment terms.', field: 'payCustom' };
+  }
+  if (!o.biz || !o.client || !o.desc || !o.price) return { error: 'Please fill your name, the other party, what changed and the amount.' };
+  if (!NUM.test(o.price)) return { error: 'Amount should be a number like 250 or 250.00.', field: 'price' };
+  if (!DATE.test(o.date)) o.date = new Date().toISOString().slice(0, 10);
+  const ph = [...new Set([o.title, o.job, o.desc, o.payCustom || ''].join('\n').match(PLACEHOLDER) || [])];
+  if (ph.length) return { error: 'Please replace the template placeholders first: ' + ph.slice(0, 5).join(', '), field: 'desc', placeholders: ph };
+  if (v3 && b.mode !== 'inperson') {
+    const c = o.clientContact; if (!c) return { error: "Add the other party's email or phone so the signing link can reach them.", field: 'clientContact' };
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c) && (c.replace(/\D/g, '').length < 6 || /[^\d\s+().-]/.test(c))) return { error: "The other party's contact should be an email or a phone number.", field: 'clientContact' };
+  }
+  return { f: o };
+}
+export function amounts(f) {
+  const dir = f.priceDir || 'inc', ch = dir === 'none' ? 0 : num(f.price) * (dir === 'dec' ? -1 : 1);
+  const rate = f.taxRate ? num(f.taxRate) : 0, tax = Math.round(ch * rate) / 100, tot = Math.round((ch + tax) * 100) / 100;
+  const orig = f.origAmount ? num(f.origAmount) : null;
+  return { ch, rate, tax, tot, orig, newTotal: orig != null ? Math.round((orig + tot) * 100) / 100 : null };
+}
+export function agreementText(f, coNo) {
+  const ref = f.job || (f.lang === 'fr' ? "l'accord initial" : 'the original agreement');
+  if (f.lang === 'fr') return `J'accepte que cette modification (avenant n°${coNo}) amende ${ref}${f.contractDate ? ' daté du ' + f.contractDate : ''} ; toutes les autres conditions restent inchangées ; ma signature électronique a la même valeur qu'une signature manuscrite.`;
+  return `I agree this change (CO #${coNo}) amends ${ref}${f.contractDate ? ' dated ' + f.contractDate : ''}; all other terms remain unchanged; my electronic signature has the same effect as a handwritten signature.`;
+}
+
+// ---------- PDF ----------
+const MAP = { '\u2018': "'", '\u2019': "'", '\u201C': '"', '\u201D': '"', '\u2013': '-', '\u2014': '-', '\u2026': '...', '\u20AC': 'EUR ', '\u00A0': ' ', '\u2212': '-' };
+const pdfSafe = s => String(s || '').replace(/[\u2018\u2019\u201C\u201D\u2013\u2014\u2026\u20AC\u00A0\u2212]/g, c => MAP[c]).replace(/[^\n\x20-\x7E\xA1-\xFF]/g, '?');
+function wrap(font, text, size, width) {
+  const out = [];
+  for (const para of pdfSafe(text).split('\n')) {
+    let line = '';
+    for (const w of para.split(/\s+/)) {
+      let word = w;
+      while (font.widthOfTextAtSize(word, size) > width) { // break very long words
+        let k = word.length; while (k > 1 && font.widthOfTextAtSize(word.slice(0, k), size) > width) k--;
+        if (line) { out.push(line); line = ''; } out.push(word.slice(0, k)); word = word.slice(k);
+      }
+      const t = line ? line + ' ' + word : word;
+      if (font.widthOfTextAtSize(t, size) > width) { out.push(line); line = word; } else line = t;
+    }
+    out.push(line);
+  }
+  return out;
+}
+const b64bytes = d => { const bin = atob(d.split(',')[1]); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+const V3KEYS = ['title', 'biz', 'bizCo', 'bizRole', 'contact', 'client', 'clientCo', 'clientRole', 'clientContact', 'job', 'contractDate', 'desc', 'lines', 'priceDir', 'price', 'origAmount', 'taxRate', 'currency', 'newDate', 'daysAdded', 'payTerms', 'payCustom', 'payMethod', 'date', 'lang'];
+export async function contentHash(doc) {
+  const f = doc.fields;
+  if (doc.v !== 3) return sha256hex(JSON.stringify([f.title, f.biz, f.contact, f.client, f.job, f.desc, f.price, f.currency, f.date]));
+  return sha256hex(JSON.stringify(['v3', V3KEYS.map(k => f[k] == null ? '' : f[k]), doc.coNo, doc.agreeText, (doc.atts || []).map(a => a.hash), doc.creatorSigHash]));
+}
+export const finalHash = doc => sha256hex(JSON.stringify(['final-v3', doc.hash, doc.creatorSigHash, doc.otherSigHash, doc.signerName, doc.signedAt]));
+
+const T = {
+  en: { draft: 'DRAFT - AWAITING SIGNATURE OF ', declined: 'DECLINED BY ', co: 'Change order #', date: 'Date', from: 'From', other: 'Other party', job: 'Job / contract', cdate: 'Original agreement dated',
+    change: 'Agreed change:', lines: 'Price breakdown:', orig: 'Original contract amount', inc: 'This change (increase)', dec: 'This change (decrease)', none: 'This change (no price change)',
+    tax: 'Tax', chtot: 'Total of this change', newtot: 'New contract total', agreed: 'Agreed amount (this change): ', sched: 'Schedule impact', newDate: 'New completion date', days: 'Days added',
+    pay: 'Payment terms', due: 'Due', method: 'Method', terms: { completion: 'On completion of this change', net7: 'Net 7 (within 7 days)', net14: 'Net 14 (within 14 days)', net30: 'Net 30 (within 30 days)' },
+    sigC: 'Signed by (creator)', sigO: 'Signed by (other party)', name: 'Name: ', signed: 'Signed ', notyet: 'Not signed yet', audit: 'Audit trail', scan: 'Scan to verify', att: 'Attachment ', reason: 'Reason: ' },
+  fr: { draft: 'BROUILLON - EN ATTENTE DE LA SIGNATURE DE ', declined: 'REFUSÉ PAR ', co: 'Avenant n°', date: 'Date', from: 'De', other: 'Autre partie', job: 'Travail / contrat', cdate: 'Accord initial daté du',
+    change: 'Modification convenue :', lines: 'Détail du prix :', orig: 'Montant du contrat initial', inc: 'Cette modification (hausse)', dec: 'Cette modification (baisse)', none: 'Cette modification (sans changement de prix)',
+    tax: 'Taxe', chtot: 'Total de cette modification', newtot: 'Nouveau total du contrat', agreed: 'Montant convenu (cette modification) : ', sched: 'Impact sur le calendrier', newDate: "Nouvelle date d'achèvement", days: 'Jours ajoutés',
+    pay: 'Conditions de paiement', due: 'Échéance', method: 'Moyen', terms: { completion: 'À la fin de cette modification', net7: 'Sous 7 jours', net14: 'Sous 14 jours', net30: 'Sous 30 jours' },
+    sigC: 'Signé par (créateur)', sigO: 'Signé par (autre partie)', name: 'Nom : ', signed: 'Signé le ', notyet: 'Pas encore signé', audit: "Piste d'audit", scan: 'Scanner pour vérifier', att: 'Pièce jointe ', reason: 'Motif : ' } };
+const fmt = (n, cur, sign) => (sign && n > 0 ? '+' : n < 0 ? '-' : '') + (cur ? cur + ' ' : '') + Math.abs(n).toFixed(2);
+
+export async function renderPdf(doc, opts = {}) {
+  const pdf = await PDFDocument.create();
+  const f = doc.fields, v3 = doc.v === 3, L = T[v3 && f.lang === 'fr' ? 'fr' : 'en'];
+  pdf.setTitle(pdfSafe(f.title)); pdf.setCreator('SignedChange'); pdf.setProducer('SignedChange');
+  const R = await pdf.embedFont(StandardFonts.Helvetica), B = await pdf.embedFont(StandardFonts.HelveticaBold);
+  let page = pdf.addPage([595, 842]); let y = 790; const X = 50, W = 495;
+  const blue = rgb(0.06, 0.3, 0.5), grey = rgb(0.45, 0.45, 0.45), red = rgb(0.75, 0.2, 0.1);
+  const pages = [page];
+  const need = h => { if (y - h < 90) { page = pdf.addPage([595, 842]); pages.push(page); y = 790; } };
+  const footer = p => {
+    if (doc.tier === 'free') {
+      p.drawRectangle({ x: 0, y: 0, width: 595, height: 34, color: rgb(0.93, 0.96, 1) });
+      p.drawText('Made with SignedChange - try free at signedchange-app.surge.sh', { x: 297 - R.widthOfTextAtSize('Made with SignedChange - try free at signedchange-app.surge.sh', 10) / 2, y: 13, size: 10, font: B, color: blue });
+    } else { const s = 'signedchange-app.surge.sh', w = R.widthOfTextAtSize(s, 7), pw = B.widthOfTextAtSize('PRO', 6) + 10, x0 = 297 - (w + 6 + pw) / 2;
+      p.drawText(s, { x: x0, y: 14, size: 7, font: R, color: grey });
+      p.drawRectangle({ x: x0 + w + 6, y: 11.5, width: pw, height: 10, color: rgb(0.96, 0.65, 0.14), opacity: 0.9 });
+      p.drawText('PRO', { x: x0 + w + 11, y: 14.3, size: 6, font: B, color: rgb(0.35, 0.23, 0) }); }
+    p.drawText('Document ID: ' + doc.id, { x: X, y: 42, size: 7, font: R, color: grey });
+  };
+  const text = (t, o = {}) => { const size = o.size || 11, font = o.bold ? B : R; for (const l of wrap(font, t, size, o.w || W)) { need(size + 4); page.drawText(l, { x: o.x || X, y, size, font, color: o.color || rgb(0, 0, 0) }); y -= size + 4; } };
+  const row = (a, b, lw = 150) => { need(16); const ls = wrap(R, b, 11, W - lw); page.drawText(pdfSafe(a) + ':', { x: X, y, size: 11, font: B }); for (const l of ls) { need(15); page.drawText(l, { x: X + lw, y, size: 11, font: R }); y -= 15; } };
+  const amt = (a, b, bold) => { need(16); page.drawText(pdfSafe(a), { x: X, y, size: 11, font: bold ? B : R }); const s = pdfSafe(b), fn = bold ? B : R; page.drawText(s, { x: X + W - fn.widthOfTextAtSize(s, 11), y, size: 11, font: fn }); y -= 16; };
+  if (opts.sample) { page.drawText('SAMPLE', { x: 150, y: 400, size: 120, font: B, color: rgb(0.9, 0.9, 0.9), rotate: { type: 'degrees', angle: 35 } }); }
+  text(f.title.toUpperCase(), { size: 18, bold: true, color: blue });
+  if (v3) text(L.co + doc.coNo + (f.contractDate ? '  |  ' + L.cdate + ' ' + f.contractDate : ''), { size: 10, bold: true, color: grey });
+  if (doc.status === 'declined') { text(L.declined + (doc.declinedBy || f.client).toUpperCase(), { size: 10, bold: true, color: red }); if (doc.declineReason) text(L.reason + doc.declineReason, { size: 9, color: red }); }
+  else if (doc.status !== 'signed') text(L.draft + f.client.toUpperCase(), { size: 10, bold: true, color: red });
+  y -= 6;
+  const party = (n, co, role, c) => n + (role ? ', ' + role : '') + (co ? ' - ' + co : '') + (c ? '  |  ' + c : '');
+  row(L.date, f.date); row(L.from, party(f.biz, f.bizCo, f.bizRole, f.contact)); row(L.other, party(f.client, f.clientCo, f.clientRole, f.clientContact)); row(L.job, f.job || '-');
+  y -= 8; text(L.change, { bold: true }); text(f.desc); y -= 6;
+  if (!v3) { text('Agreed amount: ' + (f.currency ? f.currency + ' ' : '') + f.price, { size: 14, bold: true }); y -= 4;
+    text('By signing below, both parties confirm they agreed to the change described above at the stated amount, which is added to their original agreement.', { size: 9, color: grey }); }
+  else {
+    const a = amounts(f), cur = f.currency;
+    if (f.lines && f.lines.length) { text(L.lines, { bold: true }); for (const l of f.lines) amt('  ' + l.d, fmt(num(l.a), cur)); y -= 4; }
+    page.drawLine({ start: { x: X, y: y + 10 }, end: { x: X + W, y: y + 10 }, thickness: 0.5, color: grey });
+    if (a.orig != null) amt(L.orig, fmt(a.orig, cur));
+    amt(L[f.priceDir || 'inc'], fmt(a.ch, cur, true));
+    if (a.rate) { amt(`${L.tax} (${a.rate}%)`, fmt(a.tax, cur, true)); amt(L.chtot, fmt(a.tot, cur, true), true); }
+    if (a.newTotal != null) amt(L.newtot, fmt(a.newTotal, cur), true);
+    else if (!a.rate) amt(L.agreed.replace(/: ?$/, '').trim(), fmt(a.tot, cur, true), true);
+    y -= 6;
+    if (f.newDate || +f.daysAdded) { text(L.sched, { bold: true }); if (f.newDate) row(L.newDate, f.newDate, 170); row(L.days, String(+f.daysAdded || 0), 170); y -= 4; }
+    if (f.payTerms || f.payMethod) { text(L.pay, { bold: true }); if (f.payTerms) row(L.due, f.payTerms === 'custom' ? f.payCustom : L.terms[f.payTerms], 170); if (f.payMethod) row(L.method, f.payMethod, 170); y -= 4; }
+    y -= 4; page.drawRectangle({ x: X - 4, y: y - 4 - 13 * wrap(R, doc.agreeText, 9.5, W - 8).length, width: W + 8, height: 13 * wrap(R, doc.agreeText, 9.5, W - 8).length + 14, color: rgb(0.95, 0.97, 1) });
+    text(doc.agreeText, { size: 9.5, w: W - 8, x: X + 2 }); y -= 8;
+  }
+  y -= 10; need(140);
+  const sigBox = async (label, name, dataUrl, when, x) => {
+    page.drawText(pdfSafe(label), { x, y, size: 9, font: B, color: grey });
+    if (dataUrl) { const img = await pdf.embedPng(b64bytes(dataUrl)); const s = Math.min(220 / img.width, 70 / img.height); page.drawImage(img, { x, y: y - 80, width: img.width * s, height: img.height * s }); }
+    page.drawLine({ start: { x, y: y - 84 }, end: { x: x + 220, y: y - 84 }, thickness: 0.8 });
+    page.drawText((v3 ? pdfSafe(L.name) : '') + pdfSafe(name).slice(0, 50), { x, y: y - 97, size: 9, font: v3 ? B : R });
+    page.drawText(when ? pdfSafe(L.signed) + when.replace('T', ' ').slice(0, 16) + ' UTC' : pdfSafe(L.notyet), { x, y: y - 108, size: 8, font: R, color: grey });
+  };
+  await sigBox(L.sigC, f.biz, doc.creatorSig, doc.created, X);
+  await sigBox(L.sigO, doc.signerName || f.client, doc.otherSig, doc.signedAt, X + 265);
+  y -= 130;
+  const verifyUrl = (opts.site || 'https://signedchange-app.surge.sh') + '/verify.html?id=' + doc.id;
+  need(v3 ? 215 : 110);
+  const qy = y; text(L.audit, { size: 9, bold: true, color: grey });
+  const ut = s => s ? s.replace('T', ' ').slice(0, 19) + ' UTC' : '';
+  const at = [`Document ID: ${doc.id}`, `Created: ${ut(doc.created)}${doc.creatorTz ? ' (creator local timezone: ' + doc.creatorTz + ')' : ''}`];
+  if (doc.creatorIpHash) at.push(`Creator network (hashed IP): ${doc.creatorIpHash.slice(0, 16)}  |  Browser: ${(doc.creatorUA || '-').slice(0, 90)}`);
+  at.push(`Signing method: ${doc.mode === 'remote' ? 'remote link (other party signed on their own device)' : 'in person on the creator\'s device'}`);
+  if (doc.signedAt) at.push(`Other party signed: ${ut(doc.signedAt)}${doc.signerCountry ? ' from ' + doc.signerCountry : ''}${doc.signerTz ? ' (local timezone: ' + doc.signerTz + ')' : ''}${doc.signerTyped ? ' - typed-name signature' : ''}`);
+  if (doc.signerIpHash) at.push(`Signer network (hashed IP): ${doc.signerIpHash.slice(0, 16)}  |  Browser: ${(doc.signerUA || '-').slice(0, 90)}`);
+  if (doc.declinedAt) at.push(`Declined: ${ut(doc.declinedAt)}`);
+  at.push(`Content fingerprint (SHA-256): ${doc.hash}`);
+  if (doc.creatorSigHash) at.push(`Creator signature image (SHA-256): ${doc.creatorSigHash}`);
+  if (doc.otherSigHash) at.push(`Other party signature image (SHA-256): ${doc.otherSigHash}`);
+  if (doc.finalHash) at.push(`Signed record fingerprint (SHA-256): ${doc.finalHash}`);
+  (doc.atts || []).forEach((a, i) => at.push(`Attachment ${i + 1} (${a.type}, ${Math.round(a.size / 1024)} KB) SHA-256: ${a.hash}`));
+  at.push(`Verify: ${verifyUrl}`);
+  for (const l of at) text(l, { size: 7.5, color: grey, w: v3 ? W - 100 : W });
+  if (v3) { // QR code (self-hosted generator, drawn as vector squares)
+    const qr = qrcode(0, 'M'); qr.addData(verifyUrl); qr.make(); const n = qr.getModuleCount(), S = 78 / n, qx = X + W - 80, p = pages.includes(page) ? page : page;
+    const top = Math.min(qy, 790); const by = top - 82;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) p.drawRectangle({ x: qx + c * S, y: by + (n - 1 - r) * S, width: S + 0.05, height: S + 0.05, color: rgb(0, 0, 0) });
+    p.drawText(pdfSafe(L.scan), { x: qx, y: by - 10, size: 7, font: R, color: grey });
+  }
+  if (opts.atts && opts.atts.length) {
+    for (let i = 0; i < opts.atts.length; i++) {
+      const d = opts.atts[i]; if (!d) continue;
+      page = pdf.addPage([595, 842]); pages.push(page); y = 790;
+      text(L.att + (i + 1) + ' - ' + f.title, { bold: true, color: blue });
+      text('SHA-256: ' + (doc.atts[i] && doc.atts[i].hash || ''), { size: 7.5, color: grey });
+      try { const img = d.startsWith('data:image/png') ? await pdf.embedPng(b64bytes(d)) : await pdf.embedJpg(b64bytes(d));
+        const s = Math.min(W / img.width, 620 / img.height, 1.5); page.drawImage(img, { x: X, y: y - 10 - img.height * s, width: img.width * s, height: img.height * s }); } catch { text('(image could not be rendered)', { size: 9, color: grey }); }
+    }
+  }
+  pages.forEach(footer);
+  return pdf.save();
+}
+
+// ---------- document handlers ----------
+const ua = req => cleanLine(req.headers.get('User-Agent'), 200);
+const tzOk = s => /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$|^UTC[+-]?\d{0,2}(:\d\d)?$/.test(s || '') ? s.slice(0, 60) : '';
+export async function createDoc(req, env, h, ip, ipHash, acct) {
+  let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
+  const rf = readFields(b); if (rf.error) return json({ ok: false, error: rf.error, field: rf.field, placeholders: rf.placeholders }, 400, h);
+  const creatorSig = pngOk(b.creatorSig); if (!creatorSig) return json({ ok: false, error: 'Your signature is required.', field: 'sigMe' }, 400, h);
+  const mode = b.mode === 'inperson' ? 'inperson' : 'remote';
+  let otherSig = null; if (mode === 'inperson') { otherSig = pngOk(b.otherSig); if (!otherSig) return json({ ok: false, error: 'The other party\'s signature is required.', field: 'sigOther' }, 400, h); }
+  const v3 = b.v === 3, atts = [];
+  if (b.attachments != null) {
+    if (!v3 || !Array.isArray(b.attachments) || b.attachments.length > MAX_ATT) return json({ ok: false, error: 'Up to 3 photos can be attached.', field: 'photos' }, 400, h);
+    for (const d of b.attachments) { const a = attOk(d); if (!a) return json({ ok: false, error: 'Photos must be JPEG or PNG images under 350 KB each.', field: 'photos' }, 400, h); atts.push(a); }
+  }
+  const pro = await proStatus(env, acct);
+  if (!pro) {
+    const r = await lock(env, 'used:' + acct.id, { op: 'use', limit: FREE_DOCS });
+    if (!r.ok) return json({ ok: false, error: 'free_limit', message: 'You have used your 3 free documents. Upgrade to Pro for unlimited documents.' }, 402, h);
+    const month = new Date().toISOString().slice(0, 7);
+    const r2 = await lock(env, `freeip:${ipHash}:${month}`, { op: 'use', limit: FREE_PER_IP_MONTH });
+    if (!r2.ok) { await lock(env, 'used:' + acct.id, { op: 'unuse' }); return json({ ok: false, error: 'free_limit', message: 'Free documents from this network are used up this month. Upgrade to Pro for unlimited documents.' }, 402, h); }
+  } else await lock(env, 'used:' + acct.id, { op: 'use', limit: null });
+  const id = rand(18), now = new Date().toISOString();
+  const doc = { id, acct: acct.id, fields: rf.f, creatorSig, mode, tier: pro ? 'pro' : 'free', created: now, status: mode === 'inperson' ? 'signed' : 'pending' };
+  if (v3) {
+    doc.v = 3;
+    const pk = (await sha256hex('co-v1:' + (rf.f.client + '|' + rf.f.job).toLowerCase().replace(/\s+/g, ' '))).slice(0, 24);
+    doc.coNo = (await lock(env, `cono:${acct.id}:${pk}`, { op: 'use', limit: null })).n || 1;
+    doc.agreeText = agreementText(rf.f, doc.coNo);
+    doc.creatorSigHash = await sha256hex(b64bytes(creatorSig));
+    doc.creatorIpHash = ipHash; doc.creatorUA = ua(req); doc.creatorTz = tzOk(b.tz);
+    doc.atts = [];
+    for (let i = 0; i < atts.length; i++) { doc.atts.push({ type: atts[i].type, size: atts[i].size, hash: await sha256hex(b64bytes(atts[i].data)) }); await env.PAYMENTS.put(`att:${id}:${i}`, atts[i].data, { expirationTtl: DOC_TTL }); }
+  }
+  doc.hash = await contentHash(doc);
+  let signToken = null;
+  if (mode === 'inperson') { doc.otherSig = otherSig; doc.signedAt = now; doc.signerName = rf.f.client; if (v3) { doc.otherSigHash = await sha256hex(b64bytes(otherSig)); doc.finalHash = await finalHash(doc); } }
+  else { signToken = rand(24); doc.signHash = await sha256hex('sign-v1:' + signToken); doc.signExp = Date.now() + SIGN_DAYS * 86400e3; }
+  await env.PAYMENTS.put('doc:' + id, JSON.stringify(doc), { expirationTtl: DOC_TTL });
+  await env.PAYMENTS.put(`adoc:${acct.id}:${(9e15 - Date.now()).toString().padStart(16, '0')}:${id}`, '1', { expirationTtl: DOC_TTL });
+  return json({ ok: true, id, coNo: doc.coNo || null, status: doc.status, hash: doc.hash, signUrl: signToken ? `${env.SITE_ORIGIN}/sign.html#d=${id}&t=${signToken}` : null, expires: doc.signExp ? new Date(doc.signExp).toISOString() : null }, 200, h);
+}
+
+async function loadSignable(env, d, t) {
+  if (!ID.test(d || '') || !/^[\w-]{30,40}$/.test(t || '')) return { err: 'invalid' };
+  const doc = await env.PAYMENTS.get('doc:' + d, 'json');
+  if (!doc || !doc.signHash) return { err: 'invalid' };
+  if (doc.signHash !== await sha256hex('sign-v1:' + t)) return { err: 'invalid' };
+  if (doc.status === 'signed') return { err: 'used', doc };
+  if (doc.status === 'declined') return { err: 'declined', doc };
+  if (doc.status === 'cancelled') return { err: 'cancelled' };
+  if (Date.now() > doc.signExp) return { err: 'expired' };
+  return { doc };
+}
+const SIGN_ERR = { invalid: 'This signing link is not valid.', used: 'This document has already been signed. Signing links work only once.', expired: 'This signing link has expired. Ask the sender for a new one.', cancelled: 'The sender cancelled this document.', declined: 'You declined this document. The sender has been told and can send a revised version.' };
+const loadAtts = async (env, doc) => Promise.all((doc.atts || []).map((_, i) => env.PAYMENTS.get(`att:${doc.id}:${i}`)));
+export async function getForSigning(url, env, h) {
+  const r = await loadSignable(env, url.searchParams.get('d'), url.searchParams.get('t'));
+  if (r.err) return json({ ok: false, error: SIGN_ERR[r.err], code: r.err }, r.err === 'invalid' ? 404 : 410, h);
+  const { fields, creatorSig, created, signExp, hash, v, coNo, agreeText } = r.doc;
+  const out = { ok: true, fields, creatorSig, created, expires: new Date(signExp).toISOString(), hash };
+  if (v === 3) Object.assign(out, { v, coNo, agreeText, amounts: amounts(fields), attachments: await loadAtts(env, r.doc) });
+  return json(out, 200, h);
+}
+export async function signDoc(req, env, h, ip, ipHash) {
+  let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
+  const r = await loadSignable(env, b.d, b.t);
+  if (r.err) return json({ ok: false, error: SIGN_ERR[r.err], code: r.err }, r.err === 'invalid' ? 404 : 410, h);
+  if (b.agree !== true) return json({ ok: false, error: 'Please tick the box to confirm you agree.' }, 400, h);
+  const sig = pngOk(b.sig); if (!sig) return json({ ok: false, error: 'A signature is required.' }, 400, h);
+  const name = cleanLine(b.name, 120); if (!name) return json({ ok: false, error: 'Please type your full name.' }, 400, h);
+  if (b.hash !== r.doc.hash) return json({ ok: false, error: 'The document changed or could not be checked. Reload the page.', code: 'hash' }, 409, h);
+  const viewKey = rand(24);
+  const c = await lock(env, 'sign:' + b.d, { op: 'claim', tid: viewKey, who: { ipHash } });
+  if (!c.ok) return json({ ok: false, error: SIGN_ERR.used, code: 'used' }, 410, h);
+  const doc = { ...r.doc, status: 'signed', otherSig: sig, signerName: name, signedAt: new Date().toISOString(), signerIpHash: ipHash, signerCountry: req.headers.get('CF-IPCountry') || '',
+    signerUA: ua(req), signerTz: tzOk(b.tz), signerTyped: b.typed === true || undefined, viewHash: await sha256hex('view-v1:' + viewKey) };
+  doc.otherSigHash = await sha256hex(b64bytes(sig));
+  if (!doc.creatorSigHash) doc.creatorSigHash = await sha256hex(b64bytes(doc.creatorSig));
+  doc.finalHash = await finalHash(doc);
+  await env.PAYMENTS.put('doc:' + doc.id, JSON.stringify(doc), { expirationTtl: DOC_TTL });
+  return json({ ok: true, viewKey, finalHash: doc.finalHash, viewUrl: `${env.SITE_ORIGIN}/sign.html#d=${doc.id}&v=${viewKey}` }, 200, h);
+}
+export async function declineDoc(req, env, h, ip, ipHash) {
+  let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
+  const r = await loadSignable(env, b.d, b.t);
+  if (r.err) return json({ ok: false, error: SIGN_ERR[r.err], code: r.err }, r.err === 'invalid' ? 404 : 410, h);
+  const reason = clean(b.reason, 500); if (reason.length < 3) return json({ ok: false, error: 'Please say what should change (a few words).' }, 400, h);
+  const c = await lock(env, 'sign:' + b.d, { op: 'claim', tid: 'declined', who: { ipHash } });
+  if (!c.ok) return json({ ok: false, error: SIGN_ERR.used, code: 'used' }, 410, h);
+  const doc = { ...r.doc, status: 'declined', declineReason: reason, declinedAt: new Date().toISOString(), declinedBy: cleanLine(b.name, 120) || r.doc.fields.client, signerIpHash: ipHash, signerUA: ua(req), signerTz: tzOk(b.tz) };
+  await env.PAYMENTS.put('doc:' + doc.id, JSON.stringify(doc), { expirationTtl: DOC_TTL });
+  return json({ ok: true }, 200, h);
+}
+// PDF access: owner (Authorization) or signer view key
+export async function docAccess(req, url, env) {
+  const d = url.searchParams.get('d'); if (!ID.test(d || '')) return null;
+  const doc = await env.PAYMENTS.get('doc:' + d, 'json'); if (!doc) return null;
+  const v = url.searchParams.get('v');
+  if (v && /^[\w-]{30,40}$/.test(v) && doc.viewHash && doc.viewHash === await sha256hex('view-v1:' + v)) return doc;
+  const acct = await auth(req, env); if (acct && acct.id === doc.acct) return doc;
+  return null;
+}
+export async function pdfResponse(req, url, env, h) {
+  const doc = await docAccess(req, url, env); if (!doc) return json({ ok: false, error: 'Not found.' }, 404, h);
+  const bytes = await renderPdf(doc, { site: env.SITE_ORIGIN, atts: await loadAtts(env, doc) });
+  const name = 'signedchange-' + doc.fields.client.replace(/[^\w]+/g, '-').slice(0, 40) + '-' + doc.fields.date + (doc.coNo ? '-CO' + doc.coNo : '') + (doc.status === 'signed' ? '' : doc.status === 'declined' ? '-DECLINED' : '-DRAFT') + '.pdf';
+  return new Response(bytes, { status: 200, headers: { ...h, 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${name}"`, 'Access-Control-Expose-Headers': 'Content-Disposition' } });
+}
+export async function docStatus(req, url, env, h) {
+  const doc = await docAccess(req, url, env); if (!doc) return json({ ok: false, error: 'Not found.' }, 404, h);
+  return json({ ok: true, status: doc.status, client: doc.fields.client, biz: doc.fields.biz, title: doc.fields.title, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null, declineReason: doc.declineReason || null }, 200, h);
+}
+// Public verification: no signatures, no contact details, no amounts.
+export async function verifyDoc(url, env, h) {
+  const id = url.searchParams.get('id'); if (!ID.test(id || '')) return json({ ok: false, error: 'Not a valid document ID.' }, 400, h);
+  const doc = await env.PAYMENTS.get('doc:' + id, 'json'); if (!doc) return json({ ok: false, error: 'No document with this ID. It may have been deleted by its owner.' }, 404, h);
+  const f = doc.fields;
+  return json({ ok: true, id, status: doc.status, title: f.title, coNo: doc.coNo || null, date: f.date, contractDate: f.contractDate || null, created: doc.created, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null,
+    mode: doc.mode, creator: { name: f.biz, company: f.bizCo || '', role: f.bizRole || '' }, other: { name: doc.signerName || f.client, company: f.clientCo || '', role: f.clientRole || '' },
+    hash: doc.hash, creatorSigHash: doc.creatorSigHash || null, otherSigHash: doc.otherSigHash || null, finalHash: doc.finalHash || null, attachments: (doc.atts || []).map(a => ({ type: a.type, hash: a.hash })) }, 200, h);
+}
+export async function me(env, acct, h) {
+  const pro = await proStatus(env, acct);
+  const used = (await lock(env, 'used:' + acct.id, { op: 'get' })).n || 0;
+  const list = await env.PAYMENTS.list({ prefix: `adoc:${acct.id}:`, limit: 50 });
+  const docs = [];
+  for (const k of list.keys) {
+    const d = await env.PAYMENTS.get('doc:' + k.name.split(':').pop(), 'json'); if (!d) continue;
+    docs.push({ id: d.id, title: d.fields.title, client: d.fields.client, price: d.fields.price, currency: d.fields.currency, date: d.fields.date, status: d.status, created: d.created, signedAt: d.signedAt || null, mode: d.mode,
+      expires: d.status === 'pending' ? new Date(d.signExp).toISOString() : null, coNo: d.coNo || null, v: d.v || 2, total: d.v === 3 ? amounts(d.fields).tot : null,
+      declineReason: d.declineReason || null, declinedAt: d.declinedAt || null, fields: d.fields });
+  }
+  return json({ ok: true, pro, used, freeLeft: pro ? null : Math.max(0, FREE_DOCS - used), docs }, 200, h);
+}
+export async function cancelDoc(req, env, h, acct) {
+  let b; try { b = await req.json(); } catch { return json({ ok: false }, 400, h); }
+  if (!ID.test(b.d || '')) return json({ ok: false }, 400, h);
+  const doc = await env.PAYMENTS.get('doc:' + b.d, 'json');
+  if (!doc || doc.acct !== acct.id) return json({ ok: false, error: 'Not found.' }, 404, h);
+  if (b.action === 'delete') {
+    await env.PAYMENTS.delete('doc:' + b.d);
+    for (let i = 0; i < (doc.atts || []).length; i++) await env.PAYMENTS.delete(`att:${b.d}:${i}`);
+    const list = await env.PAYMENTS.list({ prefix: `adoc:${acct.id}:` }); for (const k of list.keys) if (k.name.endsWith(':' + b.d)) await env.PAYMENTS.delete(k.name);
+    return json({ ok: true }, 200, h);
+  }
+  if (doc.status !== 'pending') return json({ ok: false, error: 'Only unsigned documents can be cancelled.' }, 409, h);
+  doc.status = 'cancelled'; delete doc.signHash; await env.PAYMENTS.put('doc:' + b.d, JSON.stringify(doc), { expirationTtl: DOC_TTL });
+  return json({ ok: true }, 200, h);
+}
+export { json, lock };

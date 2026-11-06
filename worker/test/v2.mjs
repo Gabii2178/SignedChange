@@ -1,0 +1,85 @@
+import { Miniflare } from 'miniflare';
+import http from 'node:http';
+import { writeFileSync } from 'node:fs';
+const mock = http.createServer((q, r) => { let b=''; q.on('data',c=>b+=c); q.on('end',()=>r.end(b.startsWith('cmd=_notify-validate&') && !b.includes('forged=1') ? 'VERIFIED' : 'INVALID')); }).listen(8798);
+const O='https://signedchange-app.surge.sh';
+const mf = new Miniflare({ scriptPath: 'dist/worker.js', modules: true, kvNamespaces: ['PAYMENTS'], durableObjects:{GIFT_LOCK:'GiftLock'},
+  bindings: { SITE_ORIGIN:O, RECEIVER_EMAIL:'termschange@gmail.com', PRICE:'49.00', SUB_PRICE:'9.00', CURRENCY:'USD', PAYPAL_VERIFY_URL:'http://127.0.0.1:8798/', TOKEN_SECRET:'t-secret' } });
+const res=[]; const t=(n,ok)=>{res.push(!!ok);console.log((ok?'PASS ':'FAIL ')+n)};
+let ipc=0; const req=(p,o={},ip)=>mf.dispatchFetch('http://w'+p,{...o,headers:{Origin:O,'Content-Type':'application/json','CF-Connecting-IP':ip||'1.1.1.'+(ipc),...(o.headers||{})}});
+const J=async r=>{try{return await r.json()}catch{return{}}};
+const png='data:image/png;base64,'+Buffer.from(await (await import('node:fs/promises')).readFile('test/sig.png')).toString('base64');
+const newAcct=async ip=>{const j=await J(await req('/account/new',{method:'POST'},ip));return j};
+const A=(a)=>({Authorization:`Bearer ${a.id}.${a.key}`});
+const fields={biz:'Ada Builds',contact:'ada@x.com',client:'Bob Client',job:'Kitchen',desc:'Add extra valve. “Quotes” – and € sign ✓',price:'120.00',currency:'USD',date:'2026-11-02',title:'Contractor Change Order'};
+const create=(a,extra={},ip)=>req('/doc/create',{method:'POST',headers:A(a),body:JSON.stringify({fields,creatorSig:png,mode:'remote',...extra})},ip);
+ipc=10; const a=await newAcct(); t('account created', a.ok&&a.id&&a.key);
+let r=await create(a); let j=await J(r); t('remote doc created with sign link', r.status===200&&/sign\.html#d=.+&t=/.test(j.signUrl));
+const u=new URL(j.signUrl.replace('#','?')); const d=u.searchParams.get('d'), tk=u.searchParams.get('t');
+r=await req(`/doc/get?d=${d}&t=${tk}`); let g=await J(r); t('signer can review doc', r.status===200&&g.fields.client==='Bob Client');
+r=await req(`/doc/get?d=${d}&t=${tk.slice(0,-3)+'AAA'}`); t('wrong sign token rejected', r.status===404);
+r=await req('/doc/pdf?d='+d); t('PDF without key/owner rejected', r.status===404);
+r=await req('/doc/sign',{method:'POST',body:JSON.stringify({d,t:tk,sig:png,name:'Bob Client',agree:false})}); t('sign without agreement rejected', r.status===400);
+r=await req('/doc/sign',{method:'POST',body:JSON.stringify({d,t:tk,sig:'data:image/png;base64,AAAA',name:'Bob',agree:true})}); t('fake signature image rejected', r.status===400);
+const two=await Promise.all([1,2].map(()=>req('/doc/sign',{method:'POST',body:JSON.stringify({d,t:tk,sig:png,name:'Bob Client',agree:true,hash:g.hash})})));
+const st=two.map(x=>x.status).sort(); t('concurrent double-sign: exactly one wins '+st, st[0]===200&&st[1]===410);
+const vk=(await J(two.find(x=>x.status===200))).viewKey;
+r=await req('/doc/sign',{method:'POST',body:JSON.stringify({d,t:tk,sig:png,name:'Mallory',agree:true})}); t('sign token reuse rejected', r.status===404||r.status===410);
+r=await req(`/doc/pdf?d=${d}&v=${vk}`); let pdf=Buffer.from(await r.arrayBuffer()); t('signer downloads final PDF', r.status===200&&pdf.slice(0,5).toString()==='%PDF-');
+writeFileSync('/tmp/signed-test.pdf',pdf);
+r=await req(`/doc/pdf?d=${d}`,{headers:A(a)}); t('creator downloads same PDF', r.status===200);
+const b2=await newAcct(); r=await req(`/doc/pdf?d=${d}`,{headers:A(b2)}); t('other account cannot read doc', r.status===404);
+r=await req(`/doc/pdf?d=${d}&v=${vk.slice(0,-2)+'zz'}`); t('wrong view key rejected', r.status===404);
+r=await req('/account/me',{headers:A(a)}); j=await J(r); t('history lists doc as signed, freeLeft=2', j.docs.length===1&&j.docs[0].status==='signed'&&j.freeLeft===2);
+r=await req('/account/me',{headers:{Authorization:`Bearer ${a.id}.${'x'.repeat(43)}`}}); t('wrong account key rejected', r.status===401);
+await create(a,{mode:'inperson',otherSig:png}); await create(a);
+r=await create(a); j=await J(r); t('free limit enforced server-side (4th doc 402)', r.status===402&&j.error==='free_limit');
+// concurrency on limit
+ipc=20; const c=await newAcct(); const many=await Promise.all([1,2,3,4,5,6].map(()=>create(c))); t('parallel creates cannot exceed 3 free', many.filter(x=>x.status===200).length===3);
+// IP churn: new accounts from same IP
+ipc=30; let ok=0; for(let i=0;i<4;i++){const x=await newAcct(); for(let k=0;k<3;k++) if((await create(x)).status===200) ok++;} t('free docs per network capped at 10/month (got '+ok+')', ok===10);
+ipc=40; for(let i=0;i<5;i++) await newAcct(); t('6th account per IP per day blocked', (await req('/account/new',{method:'POST'})).status===429);
+// payments
+const ipn=o=>mf.dispatchFetch('http://w/ipn',{method:'POST',body:new URLSearchParams({receiver_email:'termschange@gmail.com',mc_currency:'USD',payer_email:'p@x.com',...o}).toString()});
+await ipn({txn_type:'web_accept',payment_status:'Completed',mc_gross:'49.00',txn_id:'FORGEDLIFE000001',custom:a.id,forged:'1'});
+r=await req('/account/me',{headers:A(a)}); t('forged (unverified) IPN does not grant Pro', !(await J(r)).pro);
+await ipn({txn_type:'web_accept',payment_status:'Completed',mc_gross:'9.00',txn_id:'CHEAPLIFE0000001',custom:a.id});
+t('lifetime IPN with wrong amount ignored', !(await J(await req('/account/me',{headers:A(a)}))).pro);
+await ipn({txn_type:'web_accept',payment_status:'Completed',mc_gross:'49.00',txn_id:'LIFE000000000001',custom:a.id});
+j=await J(await req('/account/me',{headers:A(a)})); t('verified $49 IPN grants lifetime Pro', j.pro&&j.pro.plan==='lifetime');
+r=await create(a); t('Pro account can create beyond free limit', r.status===200);
+const pd=new URL((await J(r)).signUrl.replace('#','?')).searchParams.get('d');
+await ipn({payment_status:'Refunded',parent_txn_id:'LIFE000000000001',txn_id:'REFUND0000000001',mc_gross:'-49.00'});
+t('refund revokes lifetime Pro', !(await J(await req('/account/me',{headers:A(a)}))).pro);
+// subscription
+ipc=50; const s=await newAcct();
+await ipn({txn_type:'subscr_signup',subscr_id:'I-SUBTEST0001',amount3:'1.00',period3:'1 M',custom:s.id});
+await ipn({txn_type:'subscr_payment',subscr_id:'I-SUBTEST0001',payment_status:'Completed',mc_gross:'1.00',txn_id:'SUBPAYBAD0000001',custom:s.id});
+t('subscription with wrong price ignored', !(await J(await req('/account/me',{headers:A(s)}))).pro);
+await ipn({txn_type:'subscr_signup',subscr_id:'I-SUBTEST0002',amount3:'9.00',period3:'1 M',custom:s.id});
+t('signup alone (no payment yet) does not grant Pro', !(await J(await req('/account/me',{headers:A(s)}))).pro);
+await ipn({txn_type:'subscr_payment',subscr_id:'I-SUBTEST0002',payment_status:'Completed',mc_gross:'9.00',txn_id:'SUBPAY0000000001',custom:s.id});
+j=await J(await req('/account/me',{headers:A(s)})); t('verified $9 subscription payment grants monthly Pro', j.pro&&j.pro.plan==='monthly');
+await ipn({txn_type:'subscr_cancel',subscr_id:'I-SUBTEST0002',custom:s.id});
+j=await J(await req('/account/me',{headers:A(s)})); t('cancel keeps Pro until paid month ends', j.pro&&j.pro.status==='cancelled');
+await ipn({txn_type:'subscr_eot',subscr_id:'I-SUBTEST0002',custom:s.id});
+t('subscr_eot revokes Pro', !(await J(await req('/account/me',{headers:A(s)}))).pro);
+// restore sub on another device via /verify + /account/link
+ipc=60; const s2=await newAcct();
+await ipn({txn_type:'subscr_payment',subscr_id:'I-SUBTEST0003',payment_status:'Completed',mc_gross:'9.00',txn_id:'SUBPAY0000000002',custom:s2.id,payer_email:'sub@x.com'});
+const vt=await J(await req('/verify?tx=SUBPAY0000000002&email=sub@x.com')); const s3=await newAcct();
+r=await req('/account/link',{method:'POST',headers:A(s3),body:JSON.stringify({token:vt.token})}); t('restore subscription on 2nd device', r.status===200&&(await J(r)).pro.plan==='monthly');
+r=await req('/account/link',{method:'POST',headers:A(s3),body:JSON.stringify({token:vt.token+'x'})}); t('tampered token cannot link', r.status===403);
+await ipn({payment_status:'Refunded',parent_txn_id:'SUBPAY0000000002',txn_id:'REFUND0000000002',mc_gross:'-9.00'});
+t('refunded subscription payment revokes Pro', !(await J(await req('/account/me',{headers:A(s3)}))).pro);
+// cancel/expiry of sign links
+ipc=70; const e=await newAcct(); j=await J(await create(e)); const eu=new URL(j.signUrl.replace('#','?'));
+await req('/doc/cancel',{method:'POST',headers:A(e),body:JSON.stringify({d:eu.searchParams.get('d')})});
+r=await req(`/doc/get?d=${eu.searchParams.get('d')}&t=${eu.searchParams.get('t')}`); t('cancelled doc link no longer signable', r.status===410||r.status===404);
+const kv=await mf.getKVNamespace('PAYMENTS'); j=await J(await create(e)); const xu=new URL(j.signUrl.replace('#','?')); const xd=xu.searchParams.get('d');
+const rec=JSON.parse(await kv.get('doc:'+xd)); rec.signExp=Date.now()-1; await kv.put('doc:'+xd,JSON.stringify(rec));
+r=await req(`/doc/get?d=${xd}&t=${xu.searchParams.get('t')}`); t('expired sign link rejected', r.status===410);
+t('no plaintext sign token stored in KV', !(await kv.get('doc:'+xd)).includes(xu.searchParams.get('t')));
+r=await req('/doc/create',{method:'POST',headers:A(e),body:JSON.stringify({fields:{...fields,price:'abc'},creatorSig:png})}); t('invalid amount rejected', r.status===400);
+r=await mf.dispatchFetch('http://w/account/me',{headers:{Origin:'https://evil.com',...A(e)}}); t('CORS blocks other origins', !r.headers.get('Access-Control-Allow-Origin'));
+console.log(`${res.filter(Boolean).length}/${res.length} passed`); await mf.dispose(); mock.close();

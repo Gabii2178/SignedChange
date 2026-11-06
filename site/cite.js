@@ -1,0 +1,4 @@
+(function(){document.querySelectorAll('[data-copy]').forEach(function(b){var label=b.textContent;b.addEventListener('click',function(){var v=b.getAttribute('data-copy'),st=document.querySelector('.cite-st');
+function done(){b.classList.add('copied');b.textContent='Copied';if(st)st.textContent=(label.indexOf('citation')>-1?'Citation HTML':'Source link')+' copied to your clipboard.';setTimeout(function(){b.classList.remove('copied');b.textContent=label},2000)}
+function fb(){var t=document.createElement('textarea');t.value=v;t.setAttribute('readonly','');t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();try{document.execCommand('copy')}catch(e){}document.body.removeChild(t);done()}
+if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(v).then(done,fb);else fb()})})})();

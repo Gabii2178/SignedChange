@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /sign.html
+
+Sitemap: https://signedchange-app.surge.sh/sitemap.xml

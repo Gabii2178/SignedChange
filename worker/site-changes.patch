@@ -1,0 +1,61 @@
+diff -ruN -x site -x '*.zip' change-order/app_body.html change-order-pro/app_body.html
+--- change-order/app_body.html	2026-10-30 21:10:33.842520258 +0100
++++ change-order-pro/app_body.html	2026-10-31 05:55:33.828858585 +0100
+@@ -7,5 +7,8 @@
+ <p id="msg" class="msg" role="alert"></p><button class="btn full" id="gen" type="button">Download signed PDF</button>
+ <p class="small">🔒 Everything is created on this device. Nothing is uploaded.</p></div>
+ <div class="card hl" id="buy"><h2>Pro Lifetime – $49 one-time</h2><ul><li>Unlimited change records</li><li>No "Made with SignedChange" footer</li><li>Priority email support</li></ul>
+-<a class="btn full" href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&amp;business=nchunggabriel946%40gmail.com&amp;item_name=SignedChange+Pro+Lifetime&amp;amount=49.00&amp;currency_code=USD&amp;no_shipping=1" target="_blank" rel="noopener noreferrer">Pay with PayPal (card accepted via guest checkout)</a>
+-<p class="small">PayPal is our only payment method. Pro is activated once PayPal confirms your payment.</p></div>
++<a class="btn full" href="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&amp;business=nchunggabriel946%40gmail.com&amp;item_name=SignedChange+Pro+Lifetime&amp;amount=49.00&amp;currency_code=USD&amp;no_shipping=1&amp;notify_url=https%3A%2F%2Fsignedchange-unlock.WORKERS_SUBDOMAIN.workers.dev%2Fipn&amp;return=https%3A%2F%2Fsignedchange-app.surge.sh%2Fapp.html%3Fpaid%3D1&amp;rm=1&amp;cbt=Return+to+SignedChange+to+unlock+Pro" target="_blank" rel="noopener noreferrer">Pay with PayPal (card accepted via guest checkout)</a>
++<p class="small">PayPal is our only payment method. After paying, click "Return to SignedChange" and Pro unlocks automatically.</p>
++<h3>Already paid? Restore Pro</h3><label for="rtx">PayPal transaction ID (in your PayPal receipt email)</label><input id="rtx" maxlength="24" autocomplete="off" spellcheck="false">
++<label for="rem">Email used on PayPal</label><input id="rem" type="email" maxlength="120" autocomplete="email">
++<button class="btn ghost full" id="restore" type="button">Restore Pro</button><p id="rmsg" class="msg" role="status"></p></div>
+diff -ruN -x site -x '*.zip' change-order/build.py change-order-pro/build.py
+--- change-order/build.py	2026-10-30 21:10:33.842520258 +0100
++++ change-order-pro/build.py	2026-10-31 05:55:33.828858585 +0100
+@@ -1,9 +1,9 @@
+ import json, os
+ B="https://signedchange-app.surge.sh"; E="termschange@gmail.com"; O="site"
+-PP="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&amp;business=nchunggabriel946%40gmail.com&amp;item_name=SignedChange+Pro+Lifetime&amp;amount=49.00&amp;currency_code=USD&amp;no_shipping=1"
++PP="https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&amp;business=nchunggabriel946%40gmail.com&amp;item_name=SignedChange+Pro+Lifetime&amp;amount=49.00&amp;currency_code=USD&amp;no_shipping=1&amp;notify_url=https%3A%2F%2Fsignedchange-unlock.WORKERS_SUBDOMAIN.workers.dev%2Fipn&amp;return=https%3A%2F%2Fsignedchange-app.surge.sh%2Fapp.html%3Fpaid%3D1&amp;rm=1&amp;cbt=Return+to+SignedChange+to+unlock+Pro"
+ LOGO='<img class="logo" src="logo.svg" width="36" height="36" alt="">'
+ FAV=open('brand/mark.svg').read()
+-CSP="default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self'; connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self' https://www.paypal.com; frame-src 'none'; manifest-src 'self'; upgrade-insecure-requests"
++CSP="default-src 'self'; script-src 'self' https://www.googletagmanager.com; style-src 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self'; connect-src 'self' https://signedchange-unlock.WORKERS_SUBDOMAIN.workers.dev https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self' https://www.paypal.com; frame-src 'none'; manifest-src 'self'; upgrade-insecure-requests"
+ NAV=[("index.html","Home"),("app.html","App"),("services.html","Services"),("about.html","About"),("faq.html","FAQ"),("contact.html","Contact")]
+ FAQ=[("Do my clients need to install anything or make an account?","No. You open the app in any phone or desktop browser, type the change, and hand the device to your client to sign with a finger or mouse."),
+ ("Where is my data stored?","In your own browser only. The details you type and the signature are turned into a PDF on your device. We do not run a server that receives your documents."),
+--- change-order/site/app.js	2026-10-29 21:14:19.052211227 +0100
++++ change-order-pro/site/app.js	2026-10-31 05:55:47.836532304 +0100
+@@ -2,8 +2,28 @@
+ (function(){const F=3,$=i=>document.getElementById(i);
+ const msg=t=>{$('msg').textContent=t};
+ ['biz','contact'].forEach(k=>{$(k).value=localStorage.getItem('co_'+k)||'';$(k).addEventListener('input',()=>localStorage.setItem('co_'+k,$(k).value))});
+-$('date').valueAsDate=new Date();let n=+localStorage.getItem('co_n')||0;const pro=localStorage.getItem('co_pro')==='1';
++$('date').valueAsDate=new Date();let n=+localStorage.getItem('co_n')||0;let pro=false;localStorage.removeItem('co_pro');
+ const upd=()=>{$('count').textContent=pro?'Pro: unlimited':`Free documents left: ${Math.max(0,F-n)} of ${F}.`};upd();
++const API='https://signedchange-unlock.WORKERS_SUBDOMAIN.workers.dev',TK='sc_pro_token',OK='sc_pro_ok_at';
++const rmsg=t=>{const e=$('rmsg');if(e)e.textContent=t};
++async function check(){const tk=localStorage.getItem(TK);if(!tk)return;
++ try{const r=await fetch(API+'/check?token='+encodeURIComponent(tk));
++  if(r.ok){pro=true;localStorage.setItem(OK,Date.now())}else if(r.status===403){localStorage.removeItem(TK);localStorage.removeItem(OK);pro=false}}
++ catch(e){pro=Date.now()-(+localStorage.getItem(OK)||0)<7*864e5} upd()}
++async function verify(q,tries){for(let i=0;i<tries;i++){
++ try{const r=await fetch(API+'/verify?'+q),j=await r.json();
++  if(j.ok&&j.token){localStorage.setItem(TK,j.token);localStorage.setItem(OK,Date.now());pro=true;upd();rmsg('Pro unlocked. Thank you!');return true}
++  rmsg(j.error||'Not found yet.')}catch(e){rmsg('Network error, please try again.')}
++ if(i<tries-1)await new Promise(r=>setTimeout(r,6000))}return false}
++check();
++const P=new URLSearchParams(location.search);
++if(P.get('paid')==='1'){const tx=(P.get('tx')||P.get('txn_id')||'').replace(/[^A-Za-z0-9]/g,'');
++ history.replaceState(null,'',location.pathname);
++ if(tx){rmsg('Confirming your PayPal payment…');$('buy').scrollIntoView();verify('ret=1&tx='+encodeURIComponent(tx),6)}
++ else{rmsg('Payment received? Enter your PayPal transaction ID and email below to unlock Pro.');$('buy').scrollIntoView()}}
++const rb=$('restore');if(rb)rb.addEventListener('click',async()=>{const tx=$('rtx').value.trim().replace(/[^A-Za-z0-9]/g,''),em=$('rem').value.trim();
++ if(!tx||!em){rmsg('Enter both the transaction ID and your PayPal email.');return}
++ rb.disabled=true;rmsg('Checking…');await verify('tx='+encodeURIComponent(tx)+'&email='+encodeURIComponent(em),1);rb.disabled=false});
+ const c=$('sig'),x=c.getContext('2d');let d=false,signed=false;
+ function sz(){const r=c.getBoundingClientRect();c.width=r.width*2;c.height=r.height*2;x.setTransform(2,0,0,2,0,0);x.lineWidth=2.5;x.lineCap='round'}sz();
+ const p=e=>{const r=c.getBoundingClientRect();return[e.clientX-r.left,e.clientY-r.top]};

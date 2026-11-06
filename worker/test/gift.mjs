@@ -1,0 +1,20 @@
+import { Miniflare } from 'miniflare';
+import { createHmac, createHash } from 'node:crypto';
+const S='test-secret-123';
+const mf = new Miniflare({ scriptPath: 'dist/worker.js', modules: true, kvNamespaces: ['PAYMENTS'], durableObjects:{GIFT_LOCK:'GiftLock'},
+  bindings: { SITE_ORIGIN:'https://signedchange-app.surge.sh', RECEIVER_EMAIL:'termschange@gmail.com', PRICE:'49.00', CURRENCY:'USD', PAYPAL_VERIFY_URL:'http://127.0.0.1:1/', TOKEN_SECRET:S } });
+const kv = await mf.getKVNamespace('PAYMENTS');
+const key = c => 'gift:'+createHash('sha256').update('gift-v1:'+c).digest('hex');
+const code='SCGABCDEFGHJKLMNPQRSTUVWXYZ2';
+await kv.put(key(code), JSON.stringify({status:'unused'}));
+const red = c => mf.dispatchFetch('http://w/redeem',{method:'POST',headers:{Origin:'https://signedchange-app.surge.sh','Content-Type':'application/json'},body:JSON.stringify({code:c})});
+const [a,b] = await Promise.all([red('scg-abcd-efgh-jklm-npqr-stuv-wxyz2'), red(code)]);
+const ja=await a.json(), jb=await b.json(); console.log('concurrent', a.status, b.status);
+const tok = ja.token||jb.token;
+console.log('check', (await mf.dispatchFetch('http://w/check?token='+encodeURIComponent(tok))).status);
+console.log('again', (await red(code)).status);
+console.log('kv', await kv.get(key(code)));
+console.log('verify path cannot hit gift', (await mf.dispatchFetch('http://w/verify?tx='+code+'&email=termschange@gmail.com')).status);
+await kv.put(key(code), JSON.stringify({...JSON.parse(await kv.get(key(code))),revoked:true}));
+console.log('revoked check', (await mf.dispatchFetch('http://w/check?token='+encodeURIComponent(tok))).status);
+await mf.dispose();

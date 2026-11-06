@@ -1,0 +1,31 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# Local env and Wrangler config.
+# wrangler.toml.example stays tracked; the filled-in copy does not.
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+.wrangler/
+wrangler.toml
+
+# Keys, credentials, and gift-code dumps
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+credentials.json
+secrets.json
+private/
+**/newcodes.json
+
+# OS junk
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+desktop.ini

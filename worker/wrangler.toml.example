@@ -1,0 +1,29 @@
+name = "signedchange-unlock"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+SITE_ORIGIN = "https://signedchange.com"
+RECEIVER_EMAIL = "YOUR_PAYPAL_RECEIVER_EMAIL"
+PRICE = "49.00"
+SUB_PRICE = "9.00"
+CURRENCY = "USD"
+PAYPAL_VERIFY_URL = "https://ipnpb.paypal.com/cgi-bin/webscr"
+SUB_PLAN_ID = "YOUR_PAYPAL_SUBSCRIPTION_PLAN_ID"
+PAYPAL_API = "https://api-m.paypal.com"
+# Do not commit live PayPal or Cloudflare secrets.
+# Set with: wrangler secret put PAYPAL_CLIENT_SECRET
+#            wrangler secret put TOKEN_SECRET
+
+# Created with: npx wrangler kv namespace create PAYMENTS
+[[kv_namespaces]]
+binding = "PAYMENTS"
+id = "YOUR_CLOUDFLARE_KV_NAMESPACE_ID"
+
+[[durable_objects.bindings]]
+name = "GIFT_LOCK"
+class_name = "GiftLock"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GiftLock"]
