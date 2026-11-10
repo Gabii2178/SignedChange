@@ -9,7 +9,9 @@ var p=document.querySelectorAll('[data-print]');for(var i=0;i<p.length;i++)p[i].
 // Overtime
 bind('ot-form',function(){var r=n('ot-rate'),reg=n('ot-reg'),h=n('ot-hours'),m=n('ot-mult')||1.5,dt=n('ot-dt');
 var ot=Math.max(0,h-reg),reg_h=Math.min(h,reg),otp=ot*r*m,dtp=dt*r*2,tot=reg_h*r+otp+dtp;
-$('ot-out').innerHTML='<p>Regular pay: <b>'+money(reg_h*r)+'</b> ('+reg_h+' h)</p><p>Overtime pay: <b>'+money(otp)+'</b> ('+ot+' h at '+money(r*m)+'/h)</p>'+(dt?'<p>Double time: <b>'+money(dtp)+'</b> ('+dt+' h)</p>':'')+'<p class="big">Gross pay: '+money(tot)+'</p>'});
+var T=function(k,en){return window.scT?scT(k):en};
+$('ot-out').innerHTML='<p>'+T('tool.regularPay','Regular pay')+': <b>'+money(reg_h*r)+'</b> ('+reg_h+' h)</p><p>'+T('tool.otPay','Overtime pay')+': <b>'+money(otp)+'</b> ('+ot+' h at '+money(r*m)+'/h)</p>'+(dt?'<p>'+T('tool.doublePay','Double time')+': <b>'+money(dtp)+'</b> ('+dt+' h)</p>':'')+'<p class="big">'+T('tool.gross','Gross pay')+': '+money(tot)+'</p>'});
+if(window.scOnLang)scOnLang(function(){var f=document.getElementById('ot-form');if(f)f.dispatchEvent(new Event('input'))});
 
 // Late payment
 bind('lp-form',function(){var a=n('lp-amt'),rate=n('lp-rate'),d=n('lp-days'),fee=n('lp-fee'),comp=$('lp-comp')&&$('lp-comp').checked;

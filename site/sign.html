@@ -1,31 +1,70 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self'; media-src 'self'; connect-src 'self' https://cloudflareinsights.com https://signedchange-unlock.signedchange.workers.dev https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self' https://www.paypal.com; frame-src 'none'; manifest-src 'self'; upgrade-insecure-requests"><meta name="referrer" content="strict-origin-when-cross-origin">
-<title>Review &amp; sign – SignedChange</title><meta name="description" content="Write the change, sign on the spot or send a signing link, download a dated PDF. Free for your first 3 records, works on phone and desktop."><meta name="robots" content="noindex">
-<meta property="og:type" content="website"><meta property="og:site_name" content="SignedChange"><meta property="og:title" content="Create a Signed Change Record – SignedChange App"><meta property="og:description" content="Write the change, sign on the spot or send a signing link, download a dated PDF. Free for your first 3 records, works on phone and desktop."><meta property="og:url" content="https://signedchange-app.surge.sh/app.html"><meta property="og:image" content="https://signedchange-app.surge.sh/og-image.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:title" content="Review &amp; sign – SignedChange"><meta name="twitter:description" content="Write the change, sign on the spot or send a signing link, download a dated PDF. Free for your first 3 records, works on phone and desktop."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="https://signedchange-app.surge.sh/og-image.png">
-<link rel="icon" href="favicon.png" type="image/png"><link rel="icon" href="icon-32.png" sizes="32x32" type="image/png"><link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="styles.css?v=c4"><meta name="theme-color" content="#0f4c81">
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-98NMDZK65W"></script><script src="/ga.js"></script>
-</head><body>
-<header class="nav"><div class="wrap navin"><a class="brand" href="index.html"><img class="logo" src="logo.png" width="36" height="36" alt=""><span>SignedChange</span></a>
-<button class="burger" id="burger" aria-label="Open menu" aria-expanded="false" aria-controls="menu"><span></span><span></span><span></span></button>
-<ul id="menu" class="menu"><li><a class="ic i-home" href="index.html">Home</a></li><li><a class="ic i-pen" href="app.html">App</a></li><li><a class="ic i-wrench" href="/tools/">Free Tools</a></li><li><a class="ic i-briefcase" href="services.html">Services</a></li><li><a class="ic i-info" href="about.html">About</a></li><li><a class="ic i-book" href="/blog/">Blog</a></li><li><a class="ic i-help" href="faq.html">FAQ</a></li><li><a class="ic i-mail" href="contact.html">Contact</a></li></ul></div></header>
-<main class="appbox"><div id="loading"><p>Loading document…</p></div>
-<div id="review" hidden><h1 id="dt"></h1><p class="small" id="cono"></p><p class="lead">You've been asked to review and sign this agreed change. If something is wrong, you can ask for changes instead.</p><dl class="rows" id="rows"></dl><div id="totals" class="totals" hidden></div><div id="atts"></div>
-<p class="small">Already signed by the sender:</p><img id="cs" hidden alt="Sender's signature" class="sigimg"><p class="small" id="csn"></p>
-<div class="agreetxt" id="agreetxt" hidden></div>
-<label for="name">Your full name</label><input id="name" maxlength="120" autocomplete="name"><label for="sig">Your signature</label><div class="sigtabs"><button type="button" class="btn ghost sm" id="typeSig">Type my name instead</button></div><canvas id="sig"></canvas><button class="ic i-trash btn ghost full" id="clear" type="button">Clear signature</button>
-<label class="opt"><input type="checkbox" id="agree"> <span id="agreeL">I have read this and agree to the change and amount above, and I sign it electronically.</span></label>
-<p id="msg" class="msg" role="alert"></p><button class="ic i-pen btn full" id="sign" type="button">Sign and agree</button>
-<details class="declinebox" id="declineBox"><summary>Something's wrong? Ask for changes instead</summary><label for="reason">What should change?</label><textarea id="reason" rows="3" maxlength="500" placeholder="e.g. The price should be 200, not 250."></textarea><p id="dmsg" class="msg" role="alert"></p><button class="ic i-x btn ghost full" id="decline" type="button">Decline &amp; send my reason</button><p class="small">The sender sees your reason in their app and can send a corrected version. This link then stops working.</p></details>
-<p class="small">This link works once and expires on <span id="exp"></span>.</p></div>
-<div id="declined" hidden><h1>✋ Changes requested</h1><p class="lead">Thanks. The sender has been told what should change and can send you a corrected version.</p></div>
-<div id="done" hidden><h1>✅ Signed</h1><p class="lead">Thank you. Both signatures are on the document. Download your copy of the signed PDF:</p><button class="ic i-download btn full" id="dl" type="button">Download signed PDF</button><p class="small">Bookmark this page to download it again later.</p></div>
-<div id="err" hidden><h1>Link problem</h1><p class="lead" id="errm"></p></div>
-<div class="card tryfree"><b>Made with SignedChange – try free</b><p class="small">Turn verbal changes into signed PDFs in 1 minute. Your first 3 documents are free.</p><a class="ic i-pen btn" href="app.html">Try SignedChange free</a></div></main>
-<footer><div class="wrap fgrid"><div><a class="brand" href="index.html"><img class="logo" src="logo.png" width="36" height="36" alt=""><span>SignedChange</span></a><p>Signed written records for agreements that changed along the way.</p></div>
-<div><b>Product</b><a class="ic i-pen" href="app.html">Create a change record</a><a class="ic i-tag" href="index.html#pricing">Pricing</a><a class="ic i-briefcase" href="services.html">Services</a><a class="ic i-pin" href="locations.html">Locations</a><a class="ic i-wrench" href="/tools/">Free tools</a><a class="ic i-stats" href="/stats.html">Statistics</a></div>
-<div><b>Company</b><a class="ic i-book" href="/blog/">Blog</a><a class="ic i-info" href="about.html">About</a><a class="ic i-help" href="faq.html">FAQ</a><a class="ic i-mail" href="contact.html">Contact</a></div>
-<div><b>Legal</b><a class="ic i-lock" href="privacy.html">Privacy Policy</a><a class="ic i-file" href="terms.html">Terms &amp; Conditions</a><a class="ic i-mail" href="mailto:termschange@gmail.com">termschange@gmail.com</a><button type="button" class="ic i-gear cookie-link" id="cookie-settings">Cookie settings</button></div></div>
-<p class="wrap small">&copy; 2026 SignedChange. All rights reserved.</p></footer>
-<div id="cc" class="cc" role="dialog" aria-modal="false" aria-labelledby="cc-t" aria-describedby="cc-d" hidden><div class="cc-in"><p id="cc-t" class="cc-t">🍪 Cookies</p><p id="cc-d">We'd like to use Google Analytics cookies to see how the site is used. No ads, and nothing you type in the app is shared. <a href="privacy.html#cookies">Learn more</a></p><div class="cc-b"><button type="button" class="ic i-x btn ghost" id="cc-reject">Reject</button><button type="button" class="ic i-check btn" id="cc-accept">Accept</button></div></div></div>
-<script src="nav.js"></script><script src="/consent.js"></script><script src="sign.js?v=c4" defer></script><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token":"af16bf2bba994a41a82d2fb823c9718d"}'></script>
-</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.googletagmanager.com https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data: blob: https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self'; media-src 'self'; connect-src 'self' https://cloudflareinsights.com https://signedchange-unlock.signedchange.workers.dev https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self' https://www.paypal.com; frame-src 'none'; manifest-src 'self'; upgrade-insecure-requests">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Review and sign – SignedChange</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="sc.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-nav">
+  <a class="brand" href="index.html"><img src="brand/horizontal-dark.svg" alt="SignedChange" width="210" height="32"></a>
+<div class="prefs"><label class="prefs-label"><span data-i18n="pref.lang">Language</span> <select id="sc-lang" aria-label="Language"><option value="en">English</option><option value="fr">Français</option></select></label><label class="prefs-label"><span data-i18n="pref.theme">Theme</span> <select id="sc-theme" aria-label="Theme"><option value="system" data-i18n="theme.system">System</option><option value="light" data-i18n="theme.light">Light</option><option value="dark" data-i18n="theme.dark">Dark</option></select></label></div></header>
+<main id="main" class="wrap narrow section">
+<p id="loading" role="status">Loading the agreement…</p>
+<section id="review" hidden>
+  <article class="sheet">
+    <h1 id="dt">Change</h1>
+    <p id="cono"></p>
+    <dl id="rows" class="rows"></dl>
+    <div id="totals" hidden></div>
+    <div id="atts"></div>
+    <img id="cs" alt="Signature of the person who created this change" hidden>
+    <p id="csn"></p>
+    <p id="agreetxt" hidden></p>
+    <p id="agreeLang" class="help"></p>
+  </article>
+  <label for="name">Your full name</label>
+  <input id="name" maxlength="120" autocomplete="name">
+  <h2>Your signature</h2>
+  <canvas id="sig" class="sig" width="600" height="200" aria-label="Your signature"></canvas>
+  <p><button type="button" class="btn secondary" id="clear">Clear</button> <button type="button" class="btn secondary" id="typeSig">Type my name instead</button></p>
+  <label for="agree"><input type="checkbox" id="agree"> <span id="agreeL">I agree to the statement above and sign this change electronically.</span></label>
+  <p id="msg" class="ferr" role="alert"></p>
+  <p><button type="button" class="btn primary" id="sign">Sign and agree</button></p>
+  <details id="declineBox">
+    <summary>Decline instead</summary>
+    <label for="reason">What should change</label>
+    <textarea id="reason" maxlength="500"></textarea>
+    <p id="dmsg" class="ferr" role="alert"></p>
+    <button type="button" class="btn danger" id="decline">Decline and send my reason</button>
+  </details>
+  <p class="small">Link valid until <span id="exp"></span>.</p>
+</section>
+<section id="declined" hidden>
+  <h1>Declined</h1>
+  <p>Your reason was sent. This link is finished.</p>
+</section>
+<section id="done" hidden>
+  <h1>Signed</h1>
+  <p>Keep this page. The view link in the address bar is how you download the PDF later. It is not emailed.</p>
+  <button type="button" class="btn primary" id="dl">Download signed PDF</button>
+</section>
+<section id="err" hidden>
+  <h1>This link</h1>
+  <p id="errm" role="alert"></p>
+  <button type="button" class="btn secondary" id="retryGet" hidden>Try again</button>
+</section>
+</main>
+<script src="theme.js"></script>
+<script src="controls.js"></script>
+<script src="i18n/messages.js"></script>
+<script src="i18n.js"></script>
+<script src="sign.js"></script>
+</body>
+</html>

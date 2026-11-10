@@ -30,6 +30,12 @@ People who already have `pro.type === 'life'` keep that entitlement. Nothing in 
 
 Proposed cards have no PayPal form, no Smart Button, and no link to `/account/paypal-order`, `/ipn`, or the current app `#buy` checkout. The label on the card is “Proposed — not for sale yet.”
 
+## Future customer value, still not for sale
+
+Free is the allowance the server enforces today: 3 creates per account, and 10 free creates from one network in a calendar month. Delete does not return a slot. Pro, whether the current monthly plan or a future yearly plan, is the same product benefit already in `proStatus`: unlimited documents while that entitlement is active. No extra Pro-only document feature is invented here.
+
+A customer who expects to create more than three documents in a short period would use a paid plan. Monthly is the plan to cancel in PayPal between months. Yearly would be the same unlimited access billed once a year. The arithmetic, for this private note only, is a $4 reduction from the source monthly price of $9 down to the proposed $5, and $11 less than twelve times $5 ($60) if yearly is $49. $60 is that multiplication. It is not a former yearly charge.
+
 ## Where this display is allowed
 
 `docs/design-system/` previews and the blueprint pages updated with this note. Not `site/`, not the Worker, not production.

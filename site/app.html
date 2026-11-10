@@ -1,57 +1,288 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-n8SeBQJ44hfg74TlDOKj4U2ORkgMfIj5ms8CC25yEBk=' https://www.paypal.com https://*.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.paypal.com https://www.paypalobjects.com https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self'; media-src 'self'; connect-src 'self' https://*.paypal.com https://www.paypalobjects.com https://cloudflareinsights.com https://signedchange-unlock.signedchange.workers.dev https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self' https://www.paypal.com; frame-src https://*.paypal.com https://www.paypalobjects.com; manifest-src 'self'; upgrade-insecure-requests"><meta name="referrer" content="strict-origin-when-cross-origin">
-<title>Create a Signed Change Record – SignedChange App</title><meta name="description" content="Write the change, sign on the spot or send a signing link, download a dated PDF. Free for your first 3 records, works on phone and desktop."><link rel="canonical" href="https://signedchange-app.surge.sh/app.html">
-<meta property="og:type" content="website"><meta property="og:site_name" content="SignedChange"><meta property="og:title" content="Create a Signed Change Record – SignedChange App"><meta property="og:description" content="Write the change, sign on the spot or send a signing link, download a dated PDF. Free for your first 3 records, works on phone and desktop."><meta property="og:url" content="https://signedchange-app.surge.sh/app.html"><meta property="og:image" content="https://signedchange-app.surge.sh/og-image.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:title" content="Create a Signed Change Record – SignedChange App"><meta name="twitter:description" content="Write the change, sign on the spot or send a signing link, download a dated PDF. Free for your first 3 records, works on phone and desktop."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="https://signedchange-app.surge.sh/og-image.png">
-<link rel="icon" href="favicon.png" type="image/png"><link rel="icon" href="icon-32.png" sizes="32x32" type="image/png"><link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="styles.css?v=c4p"><meta name="theme-color" content="#0f4c81">
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-98NMDZK65W"></script><script src="/ga.js"></script>
-<script type="application/ld+json">{"@context": "https://schema.org", "@type": "SoftwareApplication", "name": "SignedChange", "applicationCategory": "BusinessApplication", "operatingSystem": "Web browser", "url": "https://signedchange-app.surge.sh/", "description": "Turn verbal or informally changed agreements into signed written change records.", "offers": [{"@type": "Offer", "name": "Pro Monthly", "price": "9.00", "priceCurrency": "USD"}, {"@type": "Offer", "name": "Pro Lifetime", "price": "49.00", "priceCurrency": "USD"}]}</script></head><body>
-<header class="nav"><div class="wrap navin"><a class="brand" href="index.html"><img class="logo" src="logo.png" width="36" height="36" alt=""><span>SignedChange</span><span class="probadge nb" title="Pro account" hidden><svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M12 2l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17l-6.1 3.4 1.5-6.8L2.2 9l6.9-.7z"/></svg>PRO</span></a>
-<button class="burger" id="burger" aria-label="Open menu" aria-expanded="false" aria-controls="menu"><span></span><span></span><span></span></button>
-<ul id="menu" class="menu"><li><a class="ic i-home" href="index.html">Home</a></li><li><a class="ic i-pen" href="app.html" aria-current="page">App</a></li><li><a class="ic i-wrench" href="/tools/">Free Tools</a></li><li><a class="ic i-briefcase" href="services.html">Services</a></li><li><a class="ic i-info" href="about.html">About</a></li><li><a class="ic i-book" href="/blog/">Blog</a></li><li><a class="ic i-help" href="faq.html">FAQ</a></li><li><a class="ic i-mail" href="contact.html">Contact</a></li></ul></div></header>
-<main><h1>New change record</h1><p class="lead">Write what changed, sign it, and get the other party's signature on the spot or by link on their own phone. <span id="count"></span></p>
-<div class="appbox" id="formbox"><div class="drafttools"><label for="tpl">Start from a template</label><select id="tpl"></select><div class="tplrow"><button class="btn ghost sm" id="saveTpl" type="button">Save as my template</button> <button class="btn ghost sm" id="clearDraft" type="button">Clear draft</button></div><p class="small" id="draftNote" role="status"></p></div><input id="title" type="hidden" value="Signed Change Record">
-<fieldset class="grp"><legend>You</legend><label for="biz">Your name</label><input id="biz" maxlength="120" autocomplete="name"><div class="row2e"><div><label for="bizCo">Company (optional)</label><input id="bizCo" maxlength="120" autocomplete="organization"></div><div><label for="bizRole">Role (optional)</label><input id="bizRole" maxlength="60" autocomplete="organization-title" placeholder="Owner"></div></div><label for="contact">Your phone or email</label><input id="contact" maxlength="120" autocomplete="email" inputmode="email"></fieldset>
-<fieldset class="grp"><legend>The other party</legend><label for="client">Name (client / tenant / employee…)</label><input id="client" maxlength="120"><div class="row2e"><div><label for="clientCo">Company (optional)</label><input id="clientCo" maxlength="120"></div><div><label for="clientRole">Role (optional)</label><input id="clientRole" maxlength="60"></div></div><label for="clientContact">Their email or phone <span id="ccReq">(required to send a link)</span></label><input id="clientContact" maxlength="120" inputmode="email" autocomplete="off" placeholder="name@example.com or +237 6…" aria-describedby="clientContact-e"><p class="ferr" id="clientContact-e"></p></fieldset>
-<fieldset class="grp"><legend>Original agreement</legend><label for="job">Job, project or contract</label><input id="job" maxlength="160" aria-describedby="job-e"><p class="ferr" id="job-e"></p><div class="row2e"><div><label for="contractDate">Agreement dated (optional)</label><input id="contractDate" type="date"></div><div><label for="origAmount">Original contract amount (optional)</label><input id="origAmount" inputmode="decimal" maxlength="20" placeholder="5000.00" aria-describedby="origAmount-e"></div></div><p class="ferr" id="origAmount-e"></p><p class="small" id="coHint">Each change gets a number automatically (CO #1, #2…) per client and project.</p></fieldset>
-<fieldset class="grp"><legend>The change</legend><label for="desc">What changed (extra work, new terms)</label><textarea id="desc" rows="6" maxlength="3000" aria-describedby="desc-e"></textarea><p class="ferr" id="desc-e"></p>
-<label for="priceDir">Price impact</label><select id="priceDir"><option value="inc">Increase (adds to the contract)</option><option value="dec">Decrease (credit / reduction)</option><option value="none">No price change</option></select>
-<div id="priceBox"><div class="row2"><div><label for="price">Amount of this change</label><input id="price" inputmode="decimal" maxlength="20" placeholder="250.00" aria-describedby="price-e"></div><div><label for="currency">Currency</label><select id="currency"><option>USD</option><option>EUR</option><option>GBP</option><option>XAF</option><option>NGN</option><option>GHS</option><option>KES</option><option>ZAR</option><option>CAD</option><option>AUD</option><option>INR</option></select></div></div><p class="ferr" id="price-e"></p>
-<details id="linesBox"><summary>Break the price into lines (optional)</summary><div id="lines"></div><button class="btn ghost sm" id="addLine" type="button">+ Add line</button><p class="small">When lines are used, the amount is their total.</p></details>
-<label for="taxRate">Tax rate % (optional)</label><input id="taxRate" inputmode="decimal" maxlength="7" placeholder="0" aria-describedby="taxRate-e"><p class="ferr" id="taxRate-e"></p></div>
-<div class="totals" id="totals" aria-live="polite"></div></fieldset>
-<fieldset class="grp"><legend>Schedule &amp; payment</legend><div class="row2e"><div><label for="newDate">New completion date (optional)</label><input id="newDate" type="date"></div><div><label for="daysAdded">Days added</label><input id="daysAdded" type="number" inputmode="numeric" min="-3650" max="3650" value="0"></div></div>
-<div class="row2e"><div><label for="payTerms">Payment due</label><select id="payTerms"><option value="">Not specified</option><option value="completion">On completion of this change</option><option value="net7">Net 7 (within 7 days)</option><option value="net14">Net 14</option><option value="net30">Net 30</option><option value="custom">Custom…</option></select></div><div><label for="payMethod">Payment method (optional)</label><input id="payMethod" maxlength="80" placeholder="Bank transfer, mobile money…"></div></div>
-<div id="payCustomBox" hidden><label for="payCustom">Custom payment terms</label><input id="payCustom" maxlength="120" aria-describedby="payCustom-e"><p class="ferr" id="payCustom-e"></p></div>
-<div class="row2e"><div><label for="date">Date of this change</label><input id="date" type="date"></div><div><label for="lang">PDF language</label><select id="lang"><option value="en">English</option><option value="fr">Français</option></select></div></div></fieldset>
-<fieldset class="grp"><legend>Photos (optional, up to 3)</legend><input id="photos" type="file" accept="image/jpeg,image/png" multiple aria-describedby="photos-e"><p class="ferr" id="photos-e"></p><div id="thumbs" class="thumbs"></div><p class="small">Photos are shrunk on your device before upload and added to the PDF with a fingerprint.</p></fieldset>
-<fieldset class="mode"><legend>How will the other party sign?</legend><label class="opt"><input type="radio" name="mode" value="remote" checked> 📲 Send them a link – they sign on their own phone</label><label class="opt"><input type="radio" name="mode" value="inperson"> ✍️ They sign here on this device now</label></fieldset>
-<div class="agreetxt" id="agreePrev"></div>
-<label for="sigMe">Your signature</label><div class="sigtabs"><button type="button" class="btn ghost sm" id="typeMe">Type my name instead</button></div><canvas id="sigMe" aria-describedby="sigMe-e"></canvas><p class="ferr" id="sigMe-e"></p><button class="ic i-trash btn ghost full" id="clearMe" type="button">Clear my signature</button>
-<div id="otherBox" hidden><label for="sigOther">Signature of the other party</label><div class="sigtabs"><button type="button" class="btn ghost sm" id="typeOther">Type their name instead</button></div><canvas id="sigOther" aria-describedby="sigOther-e"></canvas><p class="ferr" id="sigOther-e"></p><button class="ic i-trash btn ghost full" id="clearOther" type="button">Clear their signature</button></div>
-<p id="msg" class="msg" role="alert"></p><button class="ic i-pen btn full" id="gen" type="button">Create &amp; get signing link</button>
-<p class="small">🔒 Documents travel over HTTPS and are kept on our server so both sides can download the same signed PDF. Only you (with your account key) and the person holding the private signing link can open it. A public verify page shows only the status, names and fingerprints – never the signatures, amounts or contact details.</p></div>
-<div class="card" id="share" hidden><h2>Send it for signature</h2><p>Send this private link to the other party. It works once and expires in 14 days.</p><input id="slink" readonly>
-<p><a class="ic i-chat btn" id="wa" target="_blank" rel="noopener noreferrer">Share on WhatsApp</a> <a class="ic i-send btn ghost" id="em">Share by email</a> <button class="ic i-copy btn ghost" id="copy" type="button">Copy link</button> <button class="ic i-more btn ghost" id="nshare" type="button" hidden>More…</button></p>
-<p class="live" id="live" role="status" aria-live="polite">⏳ Waiting for them to sign… this page updates by itself.</p>
-<p class="small">When they sign, you get a notice here and the document shows ✅ in "My documents" below, where you can download the final PDF. If they ask for changes, you'll see their reason there.</p></div>
-<section class="sec"><h2>My documents</h2><div id="history"></div></section>
-<div class="card hl" id="buy"><div id="plans"><h2>Go Pro – unlimited documents</h2><div class="grid2">
-<div class="card"><h3>Pro Monthly</h3><p class="price">$9 <small>/ month</small></p><ul><li>Unlimited documents &amp; signing links</li><li>Smaller footer on PDFs</li><li>Cancel any time in PayPal</li></ul><div id="ppSub" class="ppsub"><p class="small">Loading secure PayPal / card checkout…</p></div><button class="ic i-card btn full" id="paySub" type="button" hidden>Subscribe – $9/month</button></div>
-<div class="card"><h3>Pro Lifetime</h3><p class="price">$49 <small>one-time</small></p><ul><li>Everything in Monthly, forever</li><li>Pay once, no renewals</li><li>Best value</li></ul><div id="ppLife" class="ppsub"><p class="small">Loading secure PayPal / card checkout…</p></div><button class="ic i-card btn full" id="payLife" type="button" hidden>Buy Lifetime – $49</button></div></div>
-<p id="pmsg" class="msg" role="status"></p>
-<p class="small">💳 Pay by card or PayPal on PayPal's secure page – debit and credit cards are accepted without a PayPal account where guest checkout is available. Your card number never touches our site, and PayPal's fraud checks block fake or generated cards. <b>7-day money-back guarantee:</b> not happy? Email termschange@gmail.com within 7 days for a full refund.</p></div>
-<p id="isPro" class="isPro" hidden><span class="probadge"><svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M12 2l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17l-6.1 3.4 1.5-6.8L2.2 9l6.9-.7z"/></svg>PRO</span> <span>You are Pro. Thank you!</span></p>
-<details><summary>Already paid? Restore Pro</summary><label for="rtx">PayPal transaction ID (in your PayPal receipt email)</label><input id="rtx" maxlength="24" autocomplete="off" spellcheck="false">
-<label for="rem">Email used on PayPal</label><input id="rem" type="email" maxlength="120" autocomplete="email"><button class="ic i-lock btn ghost full" id="restore" type="button">Restore Pro</button></details><p id="rmsg" class="msg" role="status"></p>
-<details><summary>Have a gift code?</summary><label for="gcode">Gift code</label><input id="gcode" maxlength="60" autocomplete="off" spellcheck="false"><button class="ic i-gift btn ghost full" id="redeem" type="button">Redeem gift code</button></details><p id="gmsg" class="msg" role="status"></p>
-<details><summary>Use your account on another phone / back up <span class="probadge" hidden><svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M12 2l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17l-6.1 3.4 1.5-6.8L2.2 9l6.9-.7z"/></svg>PRO</span></summary><p class="keywarn" role="note">⚠️ <b>Never share this key.</b> Anyone who has it can open, download and delete your documents and use your Pro plan. SignedChange will never ask you for it.</p><p class="small">This private key is your account (documents and Pro). Paste it on another device to see the same documents.</p><input id="akey" readonly placeholder="Created with your first document"><button class="ic i-copy btn ghost" id="copykey" type="button">Copy key</button>
-<label for="newkey">Paste a key from another device</label><input id="newkey" autocomplete="off" spellcheck="false"><button class="ic i-key btn ghost" id="usekey" type="button">Use this key</button><p id="kmsg" class="msg"></p></details></div>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.paypal.com https://*.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.paypal.com https://www.paypalobjects.com https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self'; media-src 'self'; connect-src 'self' https://*.paypal.com https://www.paypalobjects.com https://cloudflareinsights.com https://signedchange-unlock.signedchange.workers.dev https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com; object-src 'none'; base-uri 'self'; form-action 'self' https://www.paypal.com; frame-src https://*.paypal.com https://www.paypalobjects.com; manifest-src 'self'; upgrade-insecure-requests">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Create a change record – SignedChange</title>
+<meta name="description" content="Write the change, sign on the spot or send a signing link, and download a dated PDF.">
+<link rel="canonical" href="https://signedchange.com/app.html">
+<link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="sc.css">
+<meta name="theme-color" content="#123B63">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"SignedChange","applicationCategory":"BusinessApplication","operatingSystem":"Web browser","url":"https://signedchange.com/","description":"Turn verbal or informally changed agreements into signed written change records.","offers":[{"@type":"Offer","name":"Pro Monthly","price":"9.00","priceCurrency":"USD"},{"@type":"Offer","name":"Pro Lifetime","price":"49.00","priceCurrency":"USD"}]}</script>
+<script src="ga.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-nav">
+  <a class="brand" href="index.html"><img src="brand/horizontal-dark.svg" alt="SignedChange" width="210" height="32"></a>
+  <button id="burger" class="menu-btn" type="button" aria-expanded="false" aria-controls="menu" data-i18n="nav.menu">Menu</button>
+  <nav id="menu" aria-label="Primary">
+    <a href="product.html" data-i18n="nav.product">Product</a>
+    <a href="pricing.html" data-i18n="nav.pricing">Pricing</a>
+    <a href="app.html" data-i18n="nav.documents">Documents</a>
+    <a class="accent" href="app.html#create" data-i18n="nav.create">Create a change record</a>
+  </nav>
+<div class="prefs"><label class="prefs-label"><span data-i18n="pref.lang">Language</span> <select id="sc-lang" aria-label="Language"><option value="en">English</option><option value="fr">Français</option></select></label><label class="prefs-label"><span data-i18n="pref.theme">Theme</span> <select id="sc-theme" aria-label="Theme"><option value="system" data-i18n="theme.system">System</option><option value="light" data-i18n="theme.light">Light</option><option value="dark" data-i18n="theme.dark">Dark</option></select></label></div></header>
+<div class="app-shell">
+<nav class="app-nav" aria-label="Application">
+  <a href="#docs" id="nav-docs" data-i18n="nav.documents">Documents</a>
+  <a href="verify.html" data-i18n="nav.verify">Verify</a>
+  <a href="#account" id="nav-account" data-i18n="nav.account">Account</a>
+</nav>
+<main id="main" class="app-main">
+<section id="view-docs" class="view">
+  <h1 data-i18n="app.docs">Documents</h1>
+  <p><a class="btn accent" href="#create" data-i18n="app.new">New change record</a></p>
+  <p id="count">Your first 3 documents are free.</p>
+  <div id="listError" class="card" hidden role="alert"></div>
+  <div id="detail" class="sheet" hidden>
+    <nav class="small" aria-label="Breadcrumb"><a href="#docs" data-i18n="nav.documents">Documents</a> <span aria-hidden="true">/</span> <span id="detailCrumb"></span></nav>
+    <h2 id="detailTitle"></h2>
+    <p id="detailBadge"></p>
+    <div id="detailBody"></div>
+    <p id="detailError" class="ferr" role="alert"></p>
+    <button type="button" class="btn secondary" id="detailClose"><span data-i18n="app.backList">Back to the list</span></button>
+  </div>
+  <div id="history"></div>
+  <div class="pager">
+    <button type="button" class="btn secondary" id="prevPage" hidden data-i18n="app.prev">Previous</button>
+    <button type="button" class="btn secondary" id="nextPage" hidden data-i18n="app.next">Next</button>
+  </div>
+  <p id="pageNote" class="small">The list is one page at a time. A change on the server can move a row between pages.</p>
+</section>
+
+<section id="view-create" class="view" hidden>
+  <div id="formbox" class="narrow">
+    <h1 data-i18n="app.new">New change record</h1>
+    <details id="catalog" open>
+      <summary>Starting points</summary>
+      <h2>Starting points</h2>
+      <p>Examples you can edit. They are starting points, not legal advice, and they do not add hidden terms. Read the result and get professional advice when the change matters.</p>
+      <label for="tplSearch" data-i18n="tpl.search">Search starting points</label>
+      <input id="tplSearch" type="search">
+      <label for="tplCat" data-i18n="tpl.filter">Category</label>
+      <select id="tplCat"></select>
+      <div id="tplList" class="grid2"></div>
+    </details>
+    <article id="tplPreview" class="sheet" hidden></article>
+    <p id="stepLabel">Step 1 of 5 · The change</p>
+    <nav aria-label="Progress"><ol class="progress" id="progress"></ol></nav>
+    <section class="step" data-step="1">
+      <h2 data-i18n="step.1">The change</h2>
+      <p data-i18n="app.willSign">This text is what both people will sign.</p>
+      <label for="tpl">Template</label>
+      <select id="tpl"></select>
+      <button type="button" class="btn ghost" id="saveTpl">Save as a template on this device</button>
+      <label for="title" data-i18n="app.title">Title</label>
+      <input id="title" maxlength="80" value="Signed Change Record">
+      <p id="title-e" class="ferr"></p>
+      <label for="job">Job or contract</label>
+      <input id="job" maxlength="160">
+      <p id="job-e" class="ferr"></p>
+      <label for="contractDate">Original agreement date</label>
+      <input id="contractDate" type="date">
+      <label for="desc" data-i18n="app.desc">What changed</label>
+      <textarea id="desc" maxlength="3000" required></textarea>
+      <p id="desc-e" class="ferr"></p>
+      <label for="lang">Agreement language</label>
+      <select id="lang"><option value="en">English</option><option value="fr">Français</option></select>
+      <p class="help" data-i18n="agree.help">This chooses the language of the agreement the two people sign. It does not change the menus.</p>
+    </section>
+    <section class="step" data-step="2" hidden>
+      <h2 data-i18n="app.people">People</h2>
+      <label for="biz" data-i18n="app.biz">Your name</label>
+      <input id="biz" maxlength="120" autocomplete="name">
+      <p id="biz-e" class="ferr"></p>
+      <label for="bizCo">Your company</label>
+      <input id="bizCo" maxlength="120">
+      <label for="bizRole">Your role</label>
+      <input id="bizRole" maxlength="60">
+      <label for="contact">Your phone or email</label>
+      <input id="contact" maxlength="120" autocomplete="email">
+      <label for="client">Other party’s name</label>
+      <input id="client" maxlength="120">
+      <p id="client-e" class="ferr"></p>
+      <label for="clientCo">Their company</label>
+      <input id="clientCo" maxlength="120">
+      <label for="clientRole">Their role</label>
+      <input id="clientRole" maxlength="60">
+      <label for="clientContact">Their email or phone <span id="ccReq">(required to send a link)</span></label>
+      <input id="clientContact" maxlength="120">
+      <p id="clientContact-e" class="ferr"></p>
+      <p class="help">Needed so you can send the signing link. We do not email it for you.</p>
+    </section>
+    <section class="step" data-step="3" hidden>
+      <h2 data-i18n="app.money">Money and schedule</h2>
+      <p class="help">These figures are the agreement. They are not the SignedChange subscription.</p>
+      <label for="priceDir">Price direction</label>
+      <select id="priceDir"><option value="inc">Increase</option><option value="dec">Decrease</option><option value="none">No price change</option></select>
+      <div id="priceBox">
+        <label for="price">Amount</label>
+        <input id="price" inputmode="decimal" value="0">
+        <p id="price-e" class="ferr"></p>
+      </div>
+      <details id="linesBox">
+        <summary>Line items</summary>
+        <div id="lines"></div>
+        <button type="button" class="btn secondary" id="addLine">Add a line</button>
+      </details>
+      <label for="currency">Currency</label>
+      <select id="currency">
+        <option>USD</option><option>EUR</option><option>GBP</option><option>XAF</option><option>NGN</option><option>GHS</option><option>KES</option><option>ZAR</option><option>CAD</option><option>AUD</option><option>INR</option>
+      </select>
+      <label for="taxRate">Tax percent</label>
+      <input id="taxRate" inputmode="decimal">
+      <p id="taxRate-e" class="ferr"></p>
+      <label for="origAmount">Original amount</label>
+      <input id="origAmount" inputmode="decimal">
+      <p id="origAmount-e" class="ferr"></p>
+      <label for="newDate">New completion date</label>
+      <input id="newDate" type="date">
+      <label for="daysAdded">Days added</label>
+      <input id="daysAdded" inputmode="numeric" value="0">
+      <label for="payTerms">Payment due</label>
+      <select id="payTerms">
+        <option value="">Not specified</option>
+        <option value="completion">On completion</option>
+        <option value="net7">Net 7</option>
+        <option value="net14">Net 14</option>
+        <option value="net30">Net 30</option>
+        <option value="custom">Custom</option>
+      </select>
+      <div id="payCustomBox" hidden>
+        <label for="payCustom">Custom terms</label>
+        <input id="payCustom" maxlength="120">
+        <p id="payCustom-e" class="ferr"></p>
+      </div>
+      <label for="payMethod">Payment method</label>
+      <input id="payMethod" maxlength="80">
+      <label for="date">Date of this change</label>
+      <input id="date" type="date">
+      <h3>Preview</h3>
+      <div id="totals" class="card"></div>
+      <label for="photos">Photos (optional, up to 3)</label>
+      <input id="photos" type="file" accept="image/jpeg,image/png">
+      <p id="photos-e" class="ferr"></p>
+      <div id="thumbs"></div>
+    </section>
+    <section class="step" data-step="4" hidden>
+      <h2 data-i18n="app.review">Review</h2>
+      <article class="sheet" id="reviewSheet" aria-live="polite"></article>
+      <p class="small">The change-order number is assigned when you create this. Nothing is sent until the next step.</p>
+    </section>
+    <section class="step" data-step="5" hidden>
+      <h2 data-i18n="app.signShare">Sign and share</h2>
+      <fieldset>
+        <legend>How they sign</legend>
+        <label><input type="radio" name="mode" value="remote" checked> <span data-i18n="app.sendLink">Send a link</span></label>
+        <label><input type="radio" name="mode" value="inperson"> <span data-i18n="app.inPerson">Sign on this device</span></label>
+      </fieldset>
+      <p id="agreePrev"></p>
+      <label for="creatorAgree"><input type="checkbox" id="creatorAgree"> <span data-i18n="app.agreeBox">I agree to the statement above and sign this change electronically.</span></label>
+      <h3>Your signature</h3>
+      <canvas id="sigMe" class="sig" width="600" height="200" aria-label="Your signature"></canvas>
+      <p><button type="button" class="btn secondary" id="clearMe">Clear</button> <button type="button" class="btn secondary" id="typeMe">Type my name instead</button></p>
+      <p id="sigMe-e" class="ferr"></p>
+      <div id="otherBox" hidden>
+        <h3>Their signature</h3>
+        <canvas id="sigOther" class="sig" width="600" height="200" aria-label="Other party signature"></canvas>
+        <p><button type="button" class="btn secondary" id="clearOther">Clear</button> <button type="button" class="btn secondary" id="typeOther">Type their name instead</button></p>
+        <p id="sigOther-e" class="ferr"></p>
+      </div>
+    </section>
+    <p id="draftNote" class="small">Draft on this device.</p>
+    <button type="button" class="btn ghost" id="clearDraft">Clear draft</button>
+    <div class="stepbar">
+      <button type="button" class="btn secondary" id="back">Back</button>
+      <button type="button" class="btn primary" id="next">Continue</button>
+      <button type="button" class="btn primary" id="gen" hidden>Create &amp; get signing link</button>
+    </div>
+    <p id="msg" class="ferr" role="status" aria-live="polite"></p>
+    <section id="share" hidden>
+      <h2>Signing link</h2>
+      <p>This link is not stored on the server. Keep it. Another device cannot recover it unless this browser saved a copy.</p>
+      <label for="slink">Link</label>
+      <input id="slink" readonly>
+      <p>
+        <button type="button" class="btn secondary" id="copy">Copy</button>
+        <a class="btn secondary" id="wa" href="https://wa.me/">WhatsApp</a>
+        <a class="btn secondary" id="em" href="mailto:">Email</a>
+        <button type="button" class="btn secondary" id="nshare" hidden>Share</button>
+      </p>
+      <p id="live" class="live" role="status"></p>
+    </section>
+  </div>
+</section>
+
+<section id="view-account" class="view" hidden>
+  <h1 data-i18n="app.accountH">Account</h1>
+  <p>This browser’s private key is the account. There is no password and no profile. SignedChange cannot reset a lost key.</p>
+  <div id="buy" class="card">
+    <div id="plans">
+      <h2>Go Pro – unlimited documents</h2>
+      <div class="grid2">
+        <div class="card"><h3>Pro Monthly</h3><p class="price">$9 <small>/ month</small></p><ul><li>Unlimited documents &amp; signing links</li><li>Smaller footer on PDFs</li><li>Cancel any time in PayPal</li></ul><div id="ppSub" class="ppsub"><p class="small">Loading secure PayPal / card checkout…</p></div><button class="btn full" id="paySub" type="button" hidden>Subscribe – $9/month</button></div>
+        <div class="card"><h3>Pro Lifetime</h3><p class="price">$49 <small>one-time</small></p><ul><li>Everything in Monthly, forever</li><li>Pay once, no renewals</li><li>Best value</li></ul><div id="ppLife" class="ppsub"><p class="small">Loading secure PayPal / card checkout…</p></div><button class="btn full" id="payLife" type="button" hidden>Buy Lifetime – $49</button></div>
+      </div>
+      <p id="pmsg" class="msg" role="status"></p>
+      <p class="small">Pay by card or PayPal on PayPal's secure page. Your card number never touches our site. <b>7-day money-back guarantee:</b> email termschange@gmail.com within 7 days for a full refund.</p>
+    </div>
+    <p id="isPro" hidden><span class="probadge">PRO</span> <span>You are Pro. Thank you!</span></p>
+    <details><summary>Already paid? Restore Pro</summary>
+      <label for="rtx">PayPal transaction ID (in your PayPal receipt email)</label>
+      <input id="rtx" maxlength="24" autocomplete="off" spellcheck="false">
+      <label for="rem">Email used on PayPal</label>
+      <input id="rem" type="email" maxlength="120" autocomplete="email">
+      <button class="btn secondary" id="restore" type="button">Restore Pro</button>
+    </details>
+    <p id="rmsg" class="msg" role="status"></p>
+    <details><summary>Have a gift code?</summary>
+      <label for="gcode">Gift code</label>
+      <input id="gcode" maxlength="60" autocomplete="off" spellcheck="false">
+      <button class="btn secondary" id="redeem" type="button">Redeem gift code</button>
+    </details>
+    <p id="gmsg" class="msg" role="status"></p>
+    <details open><summary>Account key</summary>
+      <p class="keywarn"><b>Never share this key.</b> Anyone who has it can open, download and delete your documents. SignedChange will never ask you for it.</p>
+      <label for="akey">Key on this device</label>
+      <input id="akey" readonly placeholder="Created with your first document">
+      <button class="btn secondary" id="copykey" type="button">Copy key</button>
+      <button class="btn ghost" id="revealkey" type="button">Reveal key</button>
+      <label for="newkey">Paste a key from another device</label>
+      <input id="newkey" autocomplete="off" spellcheck="false">
+      <button class="btn secondary" id="usekey" type="button">Use this key</button>
+      <p id="kmsg" class="msg" role="status"></p>
+    </details>
+  </div>
+  <h2>Settings</h2>
+  <label for="themePick">Appearance of the chrome</label>
+  <select id="themePick">
+    <option value="system">Match this device</option>
+    <option value="light" data-i18n="theme.light">Light</option>
+    <option value="dark" data-i18n="theme.dark">Dark</option>
+  </select>
+  <p class="help">The agreement sheet stays white in both themes. This choice stays on this device.</p>
+  <p><button type="button" class="btn ghost" id="cookie-settings">Cookie settings</button></p>
+</section>
 </main>
-<footer><div class="wrap fgrid"><div><a class="brand" href="index.html"><img class="logo" src="logo.png" width="36" height="36" alt=""><span>SignedChange</span></a><p>Signed written records for agreements that changed along the way.</p></div>
-<div><b>Product</b><a class="ic i-pen" href="app.html">Create a change record</a><a class="ic i-tag" href="index.html#pricing">Pricing</a><a class="ic i-briefcase" href="services.html">Services</a><a class="ic i-pin" href="locations.html">Locations</a><a class="ic i-wrench" href="/tools/">Free tools</a><a class="ic i-stats" href="/stats.html">Statistics</a></div>
-<div><b>Company</b><a class="ic i-book" href="/blog/">Blog</a><a class="ic i-info" href="about.html">About</a><a class="ic i-help" href="faq.html">FAQ</a><a class="ic i-mail" href="contact.html">Contact</a></div>
-<div><b>Legal</b><a class="ic i-lock" href="privacy.html">Privacy Policy</a><a class="ic i-file" href="terms.html">Terms &amp; Conditions</a><a class="ic i-mail" href="mailto:termschange@gmail.com">termschange@gmail.com</a><button type="button" class="ic i-gear cookie-link" id="cookie-settings">Cookie settings</button></div></div>
-<p class="wrap small">&copy; 2026 SignedChange. All rights reserved.</p></footer>
-<div id="cc" class="cc" role="dialog" aria-modal="false" aria-labelledby="cc-t" aria-describedby="cc-d" hidden><div class="cc-in"><p id="cc-t" class="cc-t">🍪 Cookies</p><p id="cc-d">We'd like to use Google Analytics cookies to see how the site is used. No ads, and nothing you type in the app is shared. <a href="privacy.html#cookies">Learn more</a></p><div class="cc-b"><button type="button" class="ic i-x btn ghost" id="cc-reject">Reject</button><button type="button" class="ic i-check btn" id="cc-accept">Accept</button></div></div></div>
-<script src="nav.js"></script><script src="/consent.js"></script><script src="app.js?v=c4p" defer></script><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token":"af16bf2bba994a41a82d2fb823c9718d"}'></script>
-</body></html>
+</div>
+<footer class="site-foot"><div class="wrap"><p><a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a> · <a href="mailto:termschange@gmail.com">termschange@gmail.com</a></p></div></footer>
+<div id="cc" class="cc" role="dialog" aria-labelledby="cc-t" aria-describedby="cc-d" hidden>
+  <p id="cc-t"><b>Cookies</b></p>
+  <p id="cc-d">Analytics cookies are optional. <a href="privacy.html#cookies">Learn more</a></p>
+  <div class="row"><button type="button" class="btn secondary" id="cc-reject">Reject</button><button type="button" class="btn primary" id="cc-accept">Accept</button></div>
+</div>
+<script src="theme.js"></script>
+<script src="controls.js"></script>
+<script src="i18n/messages.js"></script>
+<script src="i18n.js"></script>
+<script src="nav.js"></script>
+<script src="consent.js"></script>
+<script src="app.js"></script>
+<script src="templates.js"></script>
+<script src="wizard.js"></script>
+</body>
+</html>

@@ -1,9 +1,9 @@
 'use strict';
-(function(){const $=i=>document.getElementById(i),API='https://signedchange-unlock.signedchange.workers.dev';
-const ST={signed:'✅ Signed by both parties',pending:'⏳ Created, waiting for the other party to sign',declined:'✋ Declined – the other party asked for changes',cancelled:'✖ Cancelled by the sender'};
+(function(){const $=i=>document.getElementById(i),API=(location.hostname==='localhost'||location.hostname==='127.0.0.1')?location.origin:'https://signedchange-unlock.signedchange.workers.dev';
+const ST={signed:'Signed',pending:'Waiting for signature',declined:'Declined',cancelled:'Cancelled'};
 const ut=s=>s?s.replace('T',' ').slice(0,16)+' UTC':'';
 async function go(id){$('vmsg').textContent='';$('vres').hidden=true;if(!/^[\w-]{16,40}$/.test(id)){$('vmsg').textContent='That does not look like a document ID.';return}
- try{const r=await fetch(API+'/doc/verify?id='+encodeURIComponent(id)),j=await r.json();if(!j.ok){$('vmsg').textContent=j.error||'Not found.';return}
+ try{const r=await fetch(API+'/doc/verify?id='+encodeURIComponent(id)),j=await r.json();if(!r.ok){$('vres').hidden=true;const t=k=>window.scT?scT(k):k;$('vmsg').textContent=r.status===400?t('verify.bad'):r.status===404?t('verify.missing'):r.status===409?t('verify.mismatch'):r.status===503?t('verify.down'):(j.error||'Not found.');return}
   $('vstat').textContent=ST[j.status]||j.status;const R=$('vrows');R.textContent='';
   const p=o=>o.name+(o.role?', '+o.role:'')+(o.company?' – '+o.company:'');
   const rows=[['Document',j.title+(j.coNo?' (change order #'+j.coNo+')':'')],['Document ID',j.id],['Date of change',j.date],j.contractDate&&['Original agreement dated',j.contractDate],['Created by',p(j.creator)],['Other party',p(j.other)],
