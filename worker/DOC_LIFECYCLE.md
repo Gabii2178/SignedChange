@@ -28,7 +28,22 @@ Retries of the same sign, after a failed KV write, reuse the stored view key and
 
 If the Durable Object binding is missing, the storage transaction API is missing, or the object cannot be reached, the mutation returns `503` and does not write KV. There is no fallback to the old read-modify-write path.
 
-`GET /doc/get` uses the same object. A terminal decision is honored even when KV still looks pending. If coordination is down, that read fails closed with `503`. Public verify and owner status still serve the KV body when coordination is down, and they hide a document when the tombstone says it was deleted.
+`GET /doc/get` uses the same object. A terminal decision is honored even when KV still looks pending. If coordination is down, that read fails closed with `503`.
+
+## Verification and listing (milestone 2)
+
+`GET /doc/verify`, `GET /doc/status`, and `GET /doc/pdf` call the same `peek` operation. They do not treat a KV body as the decision.
+
+- A deleted tombstone is not found, including when a stale body is still in KV. The peek heals that key away when it can see it.
+- A terminal `life` status is published only when the KV body has that same status after the peek. If the body is still behind, the response is `503`, not a mixture of an old body and a new status.
+- If the Durable Object cannot be reached, those three routes return `503`. They do not fall back to KV.
+- Verify, status, and PDF recompute the content fingerprint, the signed-record fingerprint when one is stored, and each attachment fingerprint. A mismatch is `409`. A signed body with no signed-record fingerprint is `503`.
+- The PDF is still rendered on read. The check refuses a body that does not match its stored fingerprints. It does not freeze PDF bytes against a future renderer change.
+- KV itself can still be stale for up to about 60 seconds in another location. The coordinator's read is not a strongly consistent KV read. Healing runs when a peek or mutation observes the disagreement.
+
+`GET /account/me` lists `adoc:{account}:` in lexicographic order. Those keys are newest-first because the timestamp portion is inverted. The default page size remains 50 and the existing fields are unchanged. Optional `limit` (1–50) and `cursor` select a page. `nextCursor` is present only when another page exists. A cursor is bound to the authenticated account and to that limit; any other cursor is `400`. The account id in the prefix comes from the bearer key, not from the query string. Rows whose tombstone is deleted are omitted. A row whose body disagrees with a terminal `life`, or whose coordinator is down, fails the list with `503` instead of showing the stale row.
+
+A document created or deleted while someone is turning pages can be skipped or repeated. A key that sorts before the cursor will not appear on a later page, and KV may keep a deleted index key until that cache expires. The list does not scan the whole account.
 
 ## Failure recovery
 

@@ -207,7 +207,7 @@ export default {
       if (P === '/doc/verify' && req.method === 'GET') { if (rateLimited('vf:' + ip, 30)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return D.verifyDoc(url, env, h); }
       const acct = await D.auth(req, env);
       if (!acct) return json({ ok: false, error: 'auth' }, 401, h);
-      if (P === '/account/me' && req.method === 'GET') return D.me(env, acct, h);
+      if (P === '/account/me' && req.method === 'GET') return D.me(env, acct, h, url);
       if (P === '/account/link' && req.method === 'POST') { if (rateLimited('l:' + ip, 10)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return linkToken(req, env, h, acct); }
       if ((P === '/account/paypal-order' || P === '/account/paypal-capture') && req.method === 'POST') { if (rateLimited('o:' + ip, 10)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return P === '/account/paypal-order' ? PP.createOrder(req, env, h, acct, json) : PP.captureOrder(req, env, h, acct, json); }
       if (P === '/account/paypal-sub' && req.method === 'POST') { if (rateLimited('p:' + ip, 10)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return PP.claimSub(req, env, h, acct, json); }

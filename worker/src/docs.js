@@ -582,58 +582,129 @@ export async function declineDoc(req, env, h, ip, ipHash) {
   const out = await docCoord(env, b.d, { action: 'decline', t: b.t, reason: b.reason, name: b.name, tz: tzOk(b.tz), ipHash, ua: ua(req) });
   return coordOut(env, b.d, { ...out, h });
 }
-// PDF access: owner (Authorization) or signer view key
+// PDF access: owner (Authorization) or signer view key. The body must already match lifecycle authority.
+async function canReadDoc(req, url, env, doc) {
+  const v = url.searchParams.get('v');
+  if (v && /^[\w-]{30,40}$/.test(v) && doc.viewHash && doc.viewHash === await sha256hex('view-v1:' + v)) return true;
+  const acct = await auth(req, env); return !!(acct && acct.id === doc.acct);
+}
+function gateDown(gate) {
+  return !gate || gate.status === 503 || gate.code === 'coord' || gate.code === 'kv' || gate.code === 'visibility';
+}
+async function fingerprintsMatch(env, doc) {
+  if (!doc || !doc.hash || (await contentHash(doc)) !== doc.hash) return false;
+  if (doc.finalHash) { if ((await finalHash(doc)) !== doc.finalHash) return false; }
+  else if (doc.status === 'signed') return false;
+  for (let i = 0; i < (doc.atts || []).length; i++) {
+    const raw = await env.PAYMENTS.get(`att:${doc.id}:${i}`);
+    if (!raw || !doc.atts[i] || (await sha256hex(b64bytes(raw))) !== doc.atts[i].hash) return false;
+  }
+  return true;
+}
+// Ask the Milestone 1 coordinator, then re-read KV. A stale body is not returned as the authority.
+async function authoritativeDoc(env, id) {
+  const gate = await docCoord(env, id, { action: 'peek' });
+  if (gateDown(gate)) return { status: 503, error: 'Document coordination is unavailable. Please try again.' };
+  if (gate.terminalStatus === 'deleted') return { status: 404, error: 'No document with this ID. It may have been deleted by its owner.' };
+  if (gate.status === 404 && !gate.terminalStatus) return { status: 404, error: 'No document with this ID. It may have been deleted by its owner.' };
+  const doc = await env.PAYMENTS.get('doc:' + id, 'json');
+  if (gate.terminalStatus && (!doc || doc.status !== gate.terminalStatus)) return { status: 503, error: 'Document coordination is unavailable. Please try again.' };
+  if (!doc) return { status: 404, error: 'No document with this ID. It may have been deleted by its owner.' };
+  if (!(await fingerprintsMatch(env, doc))) return { status: 409, error: 'This document failed its integrity check.' };
+  return { doc, lifeStatus: gate.terminalStatus || doc.status };
+}
 export async function docAccess(req, url, env) {
   const d = url.searchParams.get('d'); if (!ID.test(d || '')) return null;
   const doc = await env.PAYMENTS.get('doc:' + d, 'json'); if (!doc) return null;
-  const v = url.searchParams.get('v');
-  if (v && /^[\w-]{30,40}$/.test(v) && doc.viewHash && doc.viewHash === await sha256hex('view-v1:' + v)) return doc;
-  const acct = await auth(req, env); if (acct && acct.id === doc.acct) return doc;
-  return null;
+  return await canReadDoc(req, url, env, doc) ? doc : null;
 }
 export async function pdfResponse(req, url, env, h) {
-  const doc = await docAccess(req, url, env); if (!doc) return json({ ok: false, error: 'Not found.' }, 404, h);
+  const d = url.searchParams.get('d'); if (!ID.test(d || '')) return json({ ok: false, error: 'Not found.' }, 404, h);
+  const view = await authoritativeDoc(env, d);
+  if (!view.doc) return json({ ok: false, error: view.status === 409 ? view.error : view.status === 503 ? view.error : 'Not found.' }, view.status === 409 || view.status === 503 ? view.status : 404, h);
+  if (!(await canReadDoc(req, url, env, view.doc))) return json({ ok: false, error: 'Not found.' }, 404, h);
+  const doc = view.doc;
   const bytes = await renderPdf(doc, { site: env.SITE_ORIGIN, atts: await loadAtts(env, doc) });
   const name = 'signedchange-' + doc.fields.client.replace(/[^\w]+/g, '-').slice(0, 40) + '-' + doc.fields.date + (doc.coNo ? '-CO' + doc.coNo : '') + (doc.status === 'signed' ? '' : doc.status === 'declined' ? '-DECLINED' : '-DRAFT') + '.pdf';
   return new Response(bytes, { status: 200, headers: { ...h, 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${name}"`, 'Access-Control-Expose-Headers': 'Content-Disposition' } });
 }
 export async function docStatus(req, url, env, h) {
-  const doc = await docAccess(req, url, env); if (!doc) return json({ ok: false, error: 'Not found.' }, 404, h);
-  let status = doc.status;
-  const gate = await docCoord(env, doc.id, { action: 'peek' });
-  if (gate && gate.code !== 'coord' && gate.status !== 503 && gate.terminalStatus) {
-    if (gate.terminalStatus === 'deleted') return json({ ok: false, error: 'Not found.' }, 404, h);
-    status = gate.terminalStatus;
+  const d = url.searchParams.get('d'); if (!ID.test(d || '')) return json({ ok: false, error: 'Not found.' }, 404, h);
+  const hinted = await env.PAYMENTS.get('doc:' + d, 'json');
+  if (hinted && !(await canReadDoc(req, url, env, hinted))) return json({ ok: false, error: 'Not found.' }, 404, h);
+  if (!hinted) {
+    const acct = await auth(req, env);
+    const v = url.searchParams.get('v');
+    if (!acct && !(v && /^[\w-]{30,40}$/.test(v))) return json({ ok: false, error: 'Not found.' }, 404, h);
   }
-  return json({ ok: true, status, client: doc.fields.client, biz: doc.fields.biz, title: doc.fields.title, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null, declineReason: doc.declineReason || null }, 200, h);
+  const view = await authoritativeDoc(env, d);
+  if (!view.doc) return json({ ok: false, error: view.status === 404 ? 'Not found.' : view.error }, view.status, h);
+  if (!(await canReadDoc(req, url, env, view.doc))) return json({ ok: false, error: 'Not found.' }, 404, h);
+  const doc = view.doc;
+  return json({ ok: true, status: view.lifeStatus, client: doc.fields.client, biz: doc.fields.biz, title: doc.fields.title, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null, declineReason: doc.declineReason || null }, 200, h);
 }
 // Public verification: no signatures, no contact details, no amounts.
 export async function verifyDoc(url, env, h) {
   const id = url.searchParams.get('id'); if (!ID.test(id || '')) return json({ ok: false, error: 'Not a valid document ID.' }, 400, h);
-  const doc = await env.PAYMENTS.get('doc:' + id, 'json'); if (!doc) return json({ ok: false, error: 'No document with this ID. It may have been deleted by its owner.' }, 404, h);
-  let status = doc.status;
-  const gate = await docCoord(env, id, { action: 'peek' });
-  if (gate && gate.code !== 'coord' && gate.status !== 503 && gate.terminalStatus) {
-    if (gate.terminalStatus === 'deleted') return json({ ok: false, error: 'No document with this ID. It may have been deleted by its owner.' }, 404, h);
-    status = gate.terminalStatus;
-  }
-  const f = doc.fields;
-  return json({ ok: true, id, status, title: f.title, coNo: doc.coNo || null, date: f.date, contractDate: f.contractDate || null, created: doc.created, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null,
+  const view = await authoritativeDoc(env, id);
+  if (!view.doc) return json({ ok: false, error: view.error }, view.status, h);
+  const doc = view.doc, f = doc.fields;
+  return json({ ok: true, id, status: view.lifeStatus, title: f.title, coNo: doc.coNo || null, date: f.date, contractDate: f.contractDate || null, created: doc.created, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null,
     mode: doc.mode, creator: { name: f.biz, company: f.bizCo || '', role: f.bizRole || '' }, other: { name: doc.signerName || f.client, company: f.clientCo || '', role: f.clientRole || '' },
     hash: doc.hash, creatorSigHash: doc.creatorSigHash || null, otherSigHash: doc.otherSigHash || null, finalHash: doc.finalHash || null, attachments: (doc.atts || []).map(a => ({ type: a.type, hash: a.hash })) }, 200, h);
 }
-export async function me(env, acct, h) {
+const PAGE_MAX = 50;
+function pageLimit(url) {
+  if (!url || !url.searchParams || !url.searchParams.has('limit')) return 50;
+  const raw = url.searchParams.get('limit');
+  if (!/^\d{1,2}$/.test(raw || '')) return null;
+  const n = Number(raw);
+  return n >= 1 && n <= PAGE_MAX ? n : null;
+}
+function encodeCursor(acctId, limit, kvCursor) {
+  return btoa(JSON.stringify({ v: 1, a: acctId, l: limit, c: kvCursor })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function decodeCursor(raw, acctId, limit) {
+  if (raw == null || raw === '') return { kv: undefined };
+  if (typeof raw !== 'string' || raw.length > 2048 || !/^[\w-]+$/.test(raw)) return null;
+  try {
+    const pad = raw.replace(/-/g, '+').replace(/_/g, '/');
+    const j = JSON.parse(atob(pad + '='.repeat((4 - pad.length % 4) % 4)));
+    if (!j || j.v !== 1 || j.a !== acctId || j.l !== limit || typeof j.c !== 'string' || !j.c) return null;
+    return { kv: j.c };
+  } catch { return null; }
+}
+function listRow(d) {
+  return { id: d.id, title: d.fields.title, client: d.fields.client, price: d.fields.price, currency: d.fields.currency, date: d.fields.date, status: d.status, created: d.created, signedAt: d.signedAt || null, mode: d.mode,
+    expires: d.status === 'pending' && d.signExp ? new Date(d.signExp).toISOString() : null, coNo: d.coNo || null, v: d.v || 2, total: d.v === 3 ? amounts(d.fields).tot : null,
+    declineReason: d.declineReason || null, declinedAt: d.declinedAt || null, fields: d.fields };
+}
+export async function me(env, acct, h, url) {
   const pro = await proStatus(env, acct);
   const used = (await lock(env, 'used:' + acct.id, { op: 'get' })).n || 0;
-  const list = await env.PAYMENTS.list({ prefix: `adoc:${acct.id}:`, limit: 50 });
+  const limit = pageLimit(url);
+  if (limit == null) return json({ ok: false, error: 'Invalid limit.' }, 400, h);
+  const parsed = decodeCursor(url && url.searchParams.get('cursor'), acct.id, limit);
+  if (!parsed) return json({ ok: false, error: 'Invalid cursor.' }, 400, h);
+  const prefix = `adoc:${acct.id}:`;
+  let listed;
+  try { listed = await env.PAYMENTS.list({ prefix, limit, cursor: parsed.kv }); }
+  catch { return json({ ok: false, error: 'Invalid cursor.' }, 400, h); }
   const docs = [];
-  for (const k of list.keys) {
-    const d = await env.PAYMENTS.get('doc:' + k.name.split(':').pop(), 'json'); if (!d) continue;
-    docs.push({ id: d.id, title: d.fields.title, client: d.fields.client, price: d.fields.price, currency: d.fields.currency, date: d.fields.date, status: d.status, created: d.created, signedAt: d.signedAt || null, mode: d.mode,
-      expires: d.status === 'pending' ? new Date(d.signExp).toISOString() : null, coNo: d.coNo || null, v: d.v || 2, total: d.v === 3 ? amounts(d.fields).tot : null,
-      declineReason: d.declineReason || null, declinedAt: d.declinedAt || null, fields: d.fields });
+  for (const k of listed.keys) {
+    if (!k.name.startsWith(prefix)) return json({ ok: false, error: 'Invalid cursor.' }, 400, h);
+    const id = k.name.split(':').pop();
+    const gate = await docCoord(env, id, { action: 'peek' });
+    if (gateDown(gate)) return json({ ok: false, error: 'Document coordination is unavailable. Please try again.' }, 503, h);
+    if (gate.terminalStatus === 'deleted' || (gate.status === 404 && !gate.terminalStatus)) continue;
+    const d = await env.PAYMENTS.get('doc:' + id, 'json');
+    if (gate.terminalStatus && (!d || d.status !== gate.terminalStatus)) return json({ ok: false, error: 'Document coordination is unavailable. Please try again.' }, 503, h);
+    if (!d || d.acct !== acct.id) continue;
+    docs.push(listRow(d));
   }
-  return json({ ok: true, pro, used, freeLeft: pro ? null : Math.max(0, FREE_DOCS - used), docs }, 200, h);
+  const out = { ok: true, pro, used, freeLeft: pro ? null : Math.max(0, FREE_DOCS - used), docs };
+  if (!listed.list_complete && listed.cursor) out.nextCursor = encodeCursor(acct.id, limit, listed.cursor);
+  return json(out, 200, h);
 }
 export async function cancelDoc(req, env, h, acct) {
   let b; try { b = await req.json(); } catch { return json({ ok: false }, 400, h); }
