@@ -68,9 +68,12 @@ async function codeKey(env, code) { return 'gift:' + await sha256hex('gift-v1:' 
 
 // Durable Object = single-threaded, strongly consistent claim per code: exactly one redeemer can ever win.
 export class GiftLock {
-  constructor(state) { this.state = state; }
+  constructor(state, env) { this.state = state; this.env = env; }
   async fetch(req) {
     const body = await req.json();
+    // Document lifecycle only. claim/use/unuse/get/revoke below are unchanged
+    // and remain the payment, gift, and counter operations.
+    if (body.op === 'lifecycle') return Response.json(await D.runLifecycle(this.state, this.env, body));
     if (body.op === 'claim') {
       const cur = await this.state.storage.get('claim');
       if (cur) return Response.json({ ok: false, reason: cur.revoked ? 'revoked' : 'used' });

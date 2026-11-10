@@ -311,6 +311,240 @@ export async function createDoc(req, env, h, ip, ipHash, acct) {
   return json({ ok: true, id, coNo: doc.coNo || null, status: doc.status, hash: doc.hash, signUrl: signToken ? `${env.SITE_ORIGIN}/sign.html#d=${id}&t=${signToken}` : null, expires: doc.signExp ? new Date(doc.signExp).toISOString() : null }, 200, h);
 }
 
+// Document lifecycle coordinator. See worker/DOC_LIFECYCLE.md.
+// Gift/payment locks use other Durable Object names and the claim/use operations; they do not enter here.
+const LIFE = 'life', PENDING_SIG = 'pendingSig';
+const lifeCode = s => s === 'signed' ? 'used' : s === 'declined' ? 'declined' : s === 'cancelled' || s === 'deleted' ? 'cancelled' : 'invalid';
+function lifeHttp(code) { return code === 'invalid' || code === 'visibility' ? (code === 'visibility' ? 503 : 404) : code === 'hash' ? 409 : code === 'coord' || code === 'kv' ? 503 : 410; }
+
+async function docCoord(env, docId, body) {
+  if (!env || !env.GIFT_LOCK || typeof env.GIFT_LOCK.idFromName !== 'function' || env.SC_TEST_FAULT === 'do-down')
+    return { ok: false, status: 503, code: 'coord', error: 'Document coordination is unavailable. Please try again.' };
+  try {
+    const stub = env.GIFT_LOCK.get(env.GIFT_LOCK.idFromName('sign:' + docId));
+    const r = await stub.fetch('https://lock/', { method: 'POST', body: JSON.stringify({ op: 'lifecycle', docId, ...body }) });
+    const j = await r.json();
+    if (!j || typeof j !== 'object') return { ok: false, status: 503, code: 'coord' };
+    return j;
+  } catch { return { ok: false, status: 503, code: 'coord', error: 'Document coordination is unavailable. Please try again.' }; }
+}
+function coordOut(env, docId, out) {
+  const st = out.status || 503, h = out.h;
+  if (out.ok && out.viewKey) return json({ ok: true, viewKey: out.viewKey, finalHash: out.finalHash, viewUrl: `${env.SITE_ORIGIN}/sign.html#d=${docId}&v=${out.viewKey}` }, 200, h);
+  if (out.ok) return json({ ok: true }, 200, h);
+  if (st === 404) return json({ ok: false, error: out.error || 'Not found.', code: out.code }, 404, h);
+  if (out.code && SIGN_ERR[out.code]) return json({ ok: false, error: SIGN_ERR[out.code], code: out.code }, st, h);
+  return json({ ok: false, error: out.error || 'Document coordination is unavailable. Please try again.', code: out.code }, st, h);
+}
+async function kvGetDoc(state, env, id) {
+  const live = await env.PAYMENTS.get('doc:' + id, 'json');
+  if (env.SC_TEST_FAULT !== 'stale-get') return live;
+  const shadow = await state.storage.get('shadow');
+  if (shadow && shadow.armed) { await state.storage.put('shadow', { armed: false, doc: shadow.doc }); return shadow.doc; }
+  return live;
+}
+async function armShadow(state, env, previous) {
+  if (env.SC_TEST_FAULT === 'stale-get') await state.storage.put('shadow', { armed: true, doc: previous == null ? null : previous });
+}
+async function kvPutDoc(state, env, id, doc) {
+  if (env.SC_TEST_FAULT === 'kv-put-fail') {
+    const n = (await state.storage.get('faultPuts')) || 0;
+    if (n < 1) { await state.storage.put('faultPuts', n + 1); throw new Error('injected kv put failure'); }
+  }
+  await env.PAYMENTS.put('doc:' + id, JSON.stringify(doc), { expirationTtl: DOC_TTL });
+}
+function blankLife(doc) {
+  const terminal = !doc || doc.status !== 'pending';
+  return { gen: 1, kvGen: doc ? 1 : 0, status: doc ? doc.status : 'missing', terminal: !!doc && terminal, owner: doc ? doc.acct : null, opId: null, action: null };
+}
+function signError(doc, body) {
+  if (!doc || !doc.signHash) return { status: 404, code: 'invalid' };
+  if (doc.status === 'signed') return { status: 410, code: 'used' };
+  if (doc.status === 'declined') return { status: 410, code: 'declined' };
+  if (doc.status === 'cancelled') return { status: 410, code: 'cancelled' };
+  if (Date.now() > doc.signExp) return { status: 410, code: 'expired' };
+  return null;
+}
+async function tokenOk(doc, token) { return !!doc && doc.signHash === await sha256hex('sign-v1:' + (token || '')); }
+async function buildSigned(doc, body, life) {
+  const sig = pngOk(body.sig);
+  const name = cleanLine(body.name, 120);
+  if (body.agree !== true) return { status: 400, error: 'Please tick the box to confirm you agree.' };
+  if (!sig) return { status: 400, error: 'A signature is required.' };
+  if (!name) return { status: 400, error: 'Please type your full name.' };
+  if (body.hash !== doc.hash) return { status: 409, code: 'hash', error: 'The document changed or could not be checked. Reload the page.' };
+  const sigHash = await sha256hex(b64bytes(sig));
+  if (life && life.sigHash && life.sigHash !== sigHash) return { status: 409, code: 'hash', error: 'The document changed or could not be checked. Reload the page.' };
+  const viewKey = life && life.viewKey || rand(24);
+  const signedAt = life && life.signedAt || new Date().toISOString();
+  const next = { ...doc, status: 'signed', otherSig: sig, signerName: name, signedAt, signerIpHash: body.ipHash || '', signerCountry: body.country || '', signerUA: body.ua || '', signerTz: body.tz || '', signerTyped: body.typed === true || undefined, viewHash: await sha256hex('view-v1:' + viewKey) };
+  next.otherSigHash = sigHash;
+  if (!next.creatorSigHash && next.creatorSig) next.creatorSigHash = await sha256hex(b64bytes(next.creatorSig));
+  next.finalHash = life && life.finalHash || await finalHash(next);
+  next.lifeGen = life ? life.gen : 0;
+  return { doc: next, viewKey, finalHash: next.finalHash, sigHash, signedAt, name };
+}
+function buildCancelled(doc, gen) { const next = { ...doc, status: 'cancelled', lifeGen: gen }; delete next.signHash; return next; }
+function buildDeclined(doc, body, life) {
+  const reason = clean(body.reason, 500);
+  if (!life && reason.length < 3) return { status: 400, error: 'Please say what should change (a few words).' };
+  const declinedAt = life && life.declinedAt || new Date().toISOString();
+  const declinedBy = life && life.declinedBy || cleanLine(body.name, 120) || doc.fields.client;
+  const declineReason = life && life.declineReason || reason;
+  return { doc: { ...doc, status: 'declined', declineReason, declinedAt, declinedBy, signerIpHash: body.ipHash || doc.signerIpHash || '', signerUA: body.ua || doc.signerUA || '', signerTz: body.tz || '', lifeGen: life ? life.gen : 0 } };
+}
+function settled(life, action) {
+  if (life.status === 'deleted') return { ok: false, status: 404, code: 'cancelled', error: 'Not found.' };
+  if (action === 'cancel') {
+    if (life.status === 'cancelled') return { ok: false, status: 409, error: 'Only unsigned documents can be cancelled.' };
+    return { ok: false, status: 409, error: 'Only unsigned documents can be cancelled.' };
+  }
+  if (action === 'delete') return life.status === 'deleted' ? { ok: false, status: 404, error: 'Not found.' } : { ok: false, status: 409, error: 'Only unsigned documents can be cancelled.' };
+  return { ok: false, status: 410, code: lifeCode(life.status) };
+}
+function kvMatches(doc, life) {
+  if (!life || !life.terminal) return !!doc && doc.status === 'pending';
+  if (life.status === 'deleted') return !doc;
+  if (!doc) return false;
+  if (life.status === 'cancelled') return doc.status === 'cancelled' && !doc.signHash;
+  if (life.status === 'signed') return doc.status === 'signed' && (doc.lifeGen == null || doc.lifeGen === life.gen);
+  if (life.status === 'declined') return doc.status === 'declined' && (doc.lifeGen == null || doc.lifeGen === life.gen);
+  return false;
+}
+async function eraseDoc(env, id, acct, attCount) {
+  await env.PAYMENTS.delete('doc:' + id);
+  const n = Math.max(attCount || 0, 3);
+  for (let i = 0; i < n; i++) await env.PAYMENTS.delete(`att:${id}:${i}`);
+  if (acct) { const list = await env.PAYMENTS.list({ prefix: `adoc:${acct}:` }); for (const k of list.keys) if (k.name.endsWith(':' + id)) await env.PAYMENTS.delete(k.name); }
+}
+async function writeTerminal(state, env, id, life, doc, body) {
+  if (life.status === 'deleted') { await eraseDoc(env, id, life.owner || (doc && doc.acct), life.attCount); await armShadow(state, env, doc || null); return; }
+  let next = null;
+  if (life.status === 'cancelled') {
+    if (!doc) throw new Error('kv-base');
+    next = buildCancelled(doc.status === 'cancelled' ? doc : doc, life.gen);
+  } else if (life.status === 'declined') {
+    if (!doc) throw new Error('kv-base');
+    const built = buildDeclined(doc, body || {}, life);
+    next = built.doc; next.lifeGen = life.gen;
+  } else if (life.status === 'signed') {
+    const sig = body && pngOk(body.sig);
+    const stored = !sig && await state.storage.get(PENDING_SIG);
+    const useBody = sig ? body : stored ? { ...body, sig: stored, agree: true, hash: doc && doc.hash, name: life.signerName } : null;
+    if (!useBody || !doc) throw new Error('kv-base');
+    const built = await buildSigned({ ...doc, hash: doc.hash }, useBody, life);
+    if (built.status) throw new Error('kv-base');
+    next = built.doc; next.lifeGen = life.gen;
+  }
+  if (!next) throw new Error('kv-base');
+  const previous = doc;
+  await kvPutDoc(state, env, id, next);
+  await armShadow(state, env, previous);
+}
+async function ackLife(state, gen) {
+  return state.storage.transaction(async txn => {
+    const life = await txn.get(LIFE);
+    if (!life || life.gen !== gen) return false;
+    life.kvGen = gen;
+    await txn.put(LIFE, life);
+    await txn.delete(PENDING_SIG);
+    return true;
+  });
+}
+export async function runLifecycle(state, env, body) {
+  try {
+    if (!state || typeof state.storage.transaction !== 'function' || !env || !env.PAYMENTS) return { ok: false, status: 503, code: 'coord' };
+    const id = body.docId;
+    if (!ID.test(id || '')) return { ok: false, status: 404, code: 'invalid' };
+    const action = body.action;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const observed = await kvGetDoc(state, env, id);
+      const step = await state.storage.transaction(async txn => {
+        let life = await txn.get(LIFE);
+        const claim = await txn.get('claim');
+        if (!life && claim && observed && observed.status === 'pending') {
+          life = { gen: 1, kvGen: 0, status: 'signed', terminal: true, owner: observed.acct, opId: 'legacy-claim', action: 'sign', legacy: true };
+          await txn.put(LIFE, life);
+          return { type: 'settled', life };
+        }
+        if (!life) {
+          if (!observed) return { type: 'respond', response: { ok: false, status: action === 'delete' || action === 'cancel' ? 404 : 404, code: action === 'read' || action === 'peek' ? 'invalid' : 'invalid', error: 'Not found.' } };
+          life = blankLife(observed);
+          if (life.terminal && action !== 'delete') { life.owner = observed.acct; await txn.put(LIFE, life); return { type: 'settled', life }; }
+        }
+        const owns = !!(body.acct && ((observed && observed.acct === body.acct) || (life && life.owner === body.acct)));
+        if ((action === 'delete' || action === 'cancel') && !owns) return { type: 'respond', response: { ok: false, status: 404, error: 'Not found.' } };
+        if (action === 'delete' && owns && life.status !== 'deleted') {
+          const opId = await sha256hex('life:delete:' + id + ':' + body.acct);
+          const next = { gen: (life.gen || 0) + 1, kvGen: life.kvGen || 0, status: 'deleted', terminal: true, owner: (observed && observed.acct) || life.owner, opId, action: 'delete', attCount: observed ? (observed.atts || []).length : (life.attCount || 0) };
+          await txn.put(LIFE, next);
+          await txn.delete(PENDING_SIG);
+          return { type: 'write', life: next, success: { ok: true, status: 200 } };
+        }
+        if (life.terminal && !kvMatches(observed, life)) return { type: 'repair', life };
+        if (life.terminal && life.kvGen < life.gen) return { type: 'repair', life };
+        if (life.terminal) return { type: 'settled', life };
+        if (action === 'read' || action === 'peek') return { type: 'respond', response: { ok: true, status: 200, proceed: true } };
+        if (!observed) return { type: 'respond', response: { ok: false, status: 503, code: 'visibility', error: 'Document coordination is unavailable. Please try again.' } };
+        if ((action === 'cancel' || action === 'delete') && observed.acct !== body.acct) return { type: 'respond', response: { ok: false, status: 404, error: 'Not found.' } };
+        if (action === 'sign' || action === 'decline') {
+          if (!(await tokenOk(observed, body.t))) return { type: 'respond', response: { ok: false, status: 404, code: 'invalid' } };
+          const bad = signError(observed, body);
+          if (bad) return { type: 'respond', response: { ok: false, ...bad } };
+        }
+        const opId = await sha256hex('life:' + action + ':' + id + ':' + (body.t || '') + ':' + (body.reason || '') + ':' + (body.acct || ''));
+        const gen = (life.gen || 1) + 1;
+        if (action === 'sign') {
+          const built = await buildSigned(observed, body, null);
+          if (built.status) return { type: 'respond', response: { ok: false, ...built } };
+          const next = { gen, kvGen: life.kvGen || 0, status: 'signed', terminal: true, owner: observed.acct, opId, action, viewKey: built.viewKey, finalHash: built.finalHash, sigHash: built.sigHash, signerName: built.name, signedAt: built.signedAt, attCount: (observed.atts || []).length };
+          await txn.put(LIFE, next);
+          await txn.put(PENDING_SIG, body.sig);
+          return { type: 'write', life: next, success: { ok: true, status: 200, viewKey: built.viewKey, finalHash: built.finalHash } };
+        }
+        if (action === 'decline') {
+          const built = buildDeclined(observed, body, null);
+          if (built.status) return { type: 'respond', response: { ok: false, ...built } };
+          const next = { gen, kvGen: life.kvGen || 0, status: 'declined', terminal: true, owner: observed.acct, opId, action, declineReason: built.doc.declineReason, declinedAt: built.doc.declinedAt, declinedBy: built.doc.declinedBy, attCount: (observed.atts || []).length };
+          await txn.put(LIFE, next);
+          return { type: 'write', life: next, success: { ok: true, status: 200 } };
+        }
+        if (action === 'cancel') {
+          if (observed.status !== 'pending') return { type: 'respond', response: { ok: false, status: 409, error: 'Only unsigned documents can be cancelled.' } };
+          const next = { gen, kvGen: life.kvGen || 0, status: 'cancelled', terminal: true, owner: observed.acct, opId, action, attCount: (observed.atts || []).length };
+          await txn.put(LIFE, next);
+          return { type: 'write', life: next, success: { ok: true, status: 200 } };
+        }
+        return { type: 'respond', response: { ok: false, status: 400, error: 'Bad request.' } };
+      });
+      if (step.type === 'respond') return step.response;
+      if (step.type === 'settled') {
+        if (action === 'read' || action === 'peek') {
+          if (step.life.status === 'deleted' && observed) { try { await eraseDoc(env, id, step.life.owner, step.life.attCount); } catch { /* read still reports the tombstone */ } }
+          return { ok: step.life.status !== 'deleted', status: step.life.status === 'deleted' ? 404 : 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
+        }
+        const same = step.life.opId && step.life.kvGen < step.life.gen;
+        if (same) return { ok: false, status: 503, code: 'kv' };
+        return settled(step.life, action);
+      }
+      const incomplete = step.life.kvGen < step.life.gen;
+      try {
+        const base = observed || await env.PAYMENTS.get('doc:' + id, 'json');
+        await writeTerminal(state, env, id, step.life, base, body);
+        const acked = await ackLife(state, step.life.gen);
+        if (!acked) continue;
+        if (step.type === 'write' || (incomplete && step.life.action === action)) {
+          if (action === 'sign' && step.life.viewKey) return { ok: true, status: 200, viewKey: step.life.viewKey, finalHash: step.life.finalHash };
+          return step.success || { ok: true, status: 200 };
+        }
+        if (action === 'read' || action === 'peek') return { ok: step.life.status !== 'deleted', status: step.life.status === 'deleted' ? 404 : 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
+        return settled(step.life, action);
+      } catch { return { ok: false, status: 503, code: 'kv', error: 'Document coordination is unavailable. Please try again.' }; }
+    }
+    return { ok: false, status: 503, code: 'coord', error: 'Document coordination is unavailable. Please try again.' };
+  } catch { return { ok: false, status: 503, code: 'coord', error: 'Document coordination is unavailable. Please try again.' }; }
+}
+
 async function loadSignable(env, d, t) {
   if (!ID.test(d || '') || !/^[\w-]{30,40}$/.test(t || '')) return { err: 'invalid' };
   const doc = await env.PAYMENTS.get('doc:' + d, 'json');
@@ -325,7 +559,13 @@ async function loadSignable(env, d, t) {
 const SIGN_ERR = { invalid: 'This signing link is not valid.', used: 'This document has already been signed. Signing links work only once.', expired: 'This signing link has expired. Ask the sender for a new one.', cancelled: 'The sender cancelled this document.', declined: 'You declined this document. The sender has been told and can send a revised version.' };
 const loadAtts = async (env, doc) => Promise.all((doc.atts || []).map((_, i) => env.PAYMENTS.get(`att:${doc.id}:${i}`)));
 export async function getForSigning(url, env, h) {
-  const r = await loadSignable(env, url.searchParams.get('d'), url.searchParams.get('t'));
+  const d = url.searchParams.get('d');
+  const gate = await docCoord(env, d, { action: 'read' });
+  if (!gate.proceed) {
+    const status = gate.status === 503 || gate.status === 404 || gate.status === 400 || gate.status === 409 ? gate.status : 410;
+    return coordOut(env, d, { ...gate, ok: false, status, h });
+  }
+  const r = await loadSignable(env, d, url.searchParams.get('t'));
   if (r.err) return json({ ok: false, error: SIGN_ERR[r.err], code: r.err }, r.err === 'invalid' ? 404 : 410, h);
   const { fields, creatorSig, created, signExp, hash, v, coNo, agreeText } = r.doc;
   const out = { ok: true, fields, creatorSig, created, expires: new Date(signExp).toISOString(), hash };
@@ -334,33 +574,13 @@ export async function getForSigning(url, env, h) {
 }
 export async function signDoc(req, env, h, ip, ipHash) {
   let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
-  const r = await loadSignable(env, b.d, b.t);
-  if (r.err) return json({ ok: false, error: SIGN_ERR[r.err], code: r.err }, r.err === 'invalid' ? 404 : 410, h);
-  if (b.agree !== true) return json({ ok: false, error: 'Please tick the box to confirm you agree.' }, 400, h);
-  const sig = pngOk(b.sig); if (!sig) return json({ ok: false, error: 'A signature is required.' }, 400, h);
-  const name = cleanLine(b.name, 120); if (!name) return json({ ok: false, error: 'Please type your full name.' }, 400, h);
-  if (b.hash !== r.doc.hash) return json({ ok: false, error: 'The document changed or could not be checked. Reload the page.', code: 'hash' }, 409, h);
-  const viewKey = rand(24);
-  const c = await lock(env, 'sign:' + b.d, { op: 'claim', tid: viewKey, who: { ipHash } });
-  if (!c.ok) return json({ ok: false, error: SIGN_ERR.used, code: 'used' }, 410, h);
-  const doc = { ...r.doc, status: 'signed', otherSig: sig, signerName: name, signedAt: new Date().toISOString(), signerIpHash: ipHash, signerCountry: req.headers.get('CF-IPCountry') || '',
-    signerUA: ua(req), signerTz: tzOk(b.tz), signerTyped: b.typed === true || undefined, viewHash: await sha256hex('view-v1:' + viewKey) };
-  doc.otherSigHash = await sha256hex(b64bytes(sig));
-  if (!doc.creatorSigHash) doc.creatorSigHash = await sha256hex(b64bytes(doc.creatorSig));
-  doc.finalHash = await finalHash(doc);
-  await env.PAYMENTS.put('doc:' + doc.id, JSON.stringify(doc), { expirationTtl: DOC_TTL });
-  return json({ ok: true, viewKey, finalHash: doc.finalHash, viewUrl: `${env.SITE_ORIGIN}/sign.html#d=${doc.id}&v=${viewKey}` }, 200, h);
+  const out = await docCoord(env, b.d, { action: 'sign', t: b.t, sig: b.sig, name: b.name, agree: b.agree === true, hash: b.hash, tz: tzOk(b.tz), typed: b.typed === true, ipHash, country: req.headers.get('CF-IPCountry') || '', ua: ua(req) });
+  return coordOut(env, b.d, { ...out, h });
 }
 export async function declineDoc(req, env, h, ip, ipHash) {
   let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
-  const r = await loadSignable(env, b.d, b.t);
-  if (r.err) return json({ ok: false, error: SIGN_ERR[r.err], code: r.err }, r.err === 'invalid' ? 404 : 410, h);
-  const reason = clean(b.reason, 500); if (reason.length < 3) return json({ ok: false, error: 'Please say what should change (a few words).' }, 400, h);
-  const c = await lock(env, 'sign:' + b.d, { op: 'claim', tid: 'declined', who: { ipHash } });
-  if (!c.ok) return json({ ok: false, error: SIGN_ERR.used, code: 'used' }, 410, h);
-  const doc = { ...r.doc, status: 'declined', declineReason: reason, declinedAt: new Date().toISOString(), declinedBy: cleanLine(b.name, 120) || r.doc.fields.client, signerIpHash: ipHash, signerUA: ua(req), signerTz: tzOk(b.tz) };
-  await env.PAYMENTS.put('doc:' + doc.id, JSON.stringify(doc), { expirationTtl: DOC_TTL });
-  return json({ ok: true }, 200, h);
+  const out = await docCoord(env, b.d, { action: 'decline', t: b.t, reason: b.reason, name: b.name, tz: tzOk(b.tz), ipHash, ua: ua(req) });
+  return coordOut(env, b.d, { ...out, h });
 }
 // PDF access: owner (Authorization) or signer view key
 export async function docAccess(req, url, env) {
@@ -379,14 +599,26 @@ export async function pdfResponse(req, url, env, h) {
 }
 export async function docStatus(req, url, env, h) {
   const doc = await docAccess(req, url, env); if (!doc) return json({ ok: false, error: 'Not found.' }, 404, h);
-  return json({ ok: true, status: doc.status, client: doc.fields.client, biz: doc.fields.biz, title: doc.fields.title, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null, declineReason: doc.declineReason || null }, 200, h);
+  let status = doc.status;
+  const gate = await docCoord(env, doc.id, { action: 'peek' });
+  if (gate && gate.code !== 'coord' && gate.status !== 503 && gate.terminalStatus) {
+    if (gate.terminalStatus === 'deleted') return json({ ok: false, error: 'Not found.' }, 404, h);
+    status = gate.terminalStatus;
+  }
+  return json({ ok: true, status, client: doc.fields.client, biz: doc.fields.biz, title: doc.fields.title, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null, declineReason: doc.declineReason || null }, 200, h);
 }
 // Public verification: no signatures, no contact details, no amounts.
 export async function verifyDoc(url, env, h) {
   const id = url.searchParams.get('id'); if (!ID.test(id || '')) return json({ ok: false, error: 'Not a valid document ID.' }, 400, h);
   const doc = await env.PAYMENTS.get('doc:' + id, 'json'); if (!doc) return json({ ok: false, error: 'No document with this ID. It may have been deleted by its owner.' }, 404, h);
+  let status = doc.status;
+  const gate = await docCoord(env, id, { action: 'peek' });
+  if (gate && gate.code !== 'coord' && gate.status !== 503 && gate.terminalStatus) {
+    if (gate.terminalStatus === 'deleted') return json({ ok: false, error: 'No document with this ID. It may have been deleted by its owner.' }, 404, h);
+    status = gate.terminalStatus;
+  }
   const f = doc.fields;
-  return json({ ok: true, id, status: doc.status, title: f.title, coNo: doc.coNo || null, date: f.date, contractDate: f.contractDate || null, created: doc.created, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null,
+  return json({ ok: true, id, status, title: f.title, coNo: doc.coNo || null, date: f.date, contractDate: f.contractDate || null, created: doc.created, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null,
     mode: doc.mode, creator: { name: f.biz, company: f.bizCo || '', role: f.bizRole || '' }, other: { name: doc.signerName || f.client, company: f.clientCo || '', role: f.clientRole || '' },
     hash: doc.hash, creatorSigHash: doc.creatorSigHash || null, otherSigHash: doc.otherSigHash || null, finalHash: doc.finalHash || null, attachments: (doc.atts || []).map(a => ({ type: a.type, hash: a.hash })) }, 200, h);
 }
@@ -406,16 +638,7 @@ export async function me(env, acct, h) {
 export async function cancelDoc(req, env, h, acct) {
   let b; try { b = await req.json(); } catch { return json({ ok: false }, 400, h); }
   if (!ID.test(b.d || '')) return json({ ok: false }, 400, h);
-  const doc = await env.PAYMENTS.get('doc:' + b.d, 'json');
-  if (!doc || doc.acct !== acct.id) return json({ ok: false, error: 'Not found.' }, 404, h);
-  if (b.action === 'delete') {
-    await env.PAYMENTS.delete('doc:' + b.d);
-    for (let i = 0; i < (doc.atts || []).length; i++) await env.PAYMENTS.delete(`att:${b.d}:${i}`);
-    const list = await env.PAYMENTS.list({ prefix: `adoc:${acct.id}:` }); for (const k of list.keys) if (k.name.endsWith(':' + b.d)) await env.PAYMENTS.delete(k.name);
-    return json({ ok: true }, 200, h);
-  }
-  if (doc.status !== 'pending') return json({ ok: false, error: 'Only unsigned documents can be cancelled.' }, 409, h);
-  doc.status = 'cancelled'; delete doc.signHash; await env.PAYMENTS.put('doc:' + b.d, JSON.stringify(doc), { expirationTtl: DOC_TTL });
-  return json({ ok: true }, 200, h);
+  const out = await docCoord(env, b.d, { action: b.action === 'delete' ? 'delete' : 'cancel', acct: acct.id });
+  return coordOut(env, b.d, { ...out, h });
 }
 export { json, lock };
