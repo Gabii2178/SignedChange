@@ -55,7 +55,7 @@ H1 “Account”. Explain that the key in `localStorage` (`sc_acct`) is the acco
 
 There is no password, no email login, and no recovery beyond the key. The screen must say that a lost key cannot be reset by SignedChange.
 
-Pro status is displayed from `pro`, not from a checkout redirect. “Restore Pro” stays the existing transaction-id form. Do not redesign the PayPal calls.
+Pro status is displayed from `pro`, not from a checkout redirect. “Restore Pro” stays the existing transaction-id form. Do not redesign the PayPal calls. The proposed $5 and $49-per-year cards in [16-proposed-pricing.md](16-proposed-pricing.md) are not the in-app purchase block. That block still shows $9 a month and $49 Lifetime until a billing migration is authorized.
 
 ## Settings
 

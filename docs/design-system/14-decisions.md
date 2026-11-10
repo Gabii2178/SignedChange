@@ -12,7 +12,7 @@
 | In-person consent | Checkbox in the UI only | The create API does not require `agree` for in-person. Do not invent a field |
 | Status names | The server statuses plus one local draft label | There is no review event, invite event, or audit timeline API |
 | Verify when the coordinator is down | `503`, not the KV body | Milestone 2 removed that fallback |
-| Prices | $0 / $9 / $49 as they are | Payment is frozen |
+| Proposed prices | Free $0, Monthly $5 with source $9 struck through, Yearly $49 with a $5×12 = $60 comparison struck through | Display only. Lifetime remains what the source sells. See 16-proposed-pricing.md |
 | New public origin in copy | `https://signedchange.com` | Owner direction. Do not retarget PayPal URLs as part of branding |
 | Favicon | Simplified tile | The pen nib and S counter do not survive at 16 px. The check and amber on navy do |
 

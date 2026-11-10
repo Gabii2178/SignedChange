@@ -27,7 +27,7 @@ Mobile-first. Layouts are one column until the breakpoint that has a real second
 
 ## Cards, dialogs, tables
 
-- Pricing cards stack under 768 px and sit in a row of three from 768 px. The Lifetime card is not lifted with a shadow.
+- Proposed pricing cards stack under 768 px and sit in a row of three from 768 px. The Yearly card is not lifted with a shadow. Struck prices stay on their own line so they remain readable when the card is full width.
 - Dialogs are full-screen sheets under 600 px and a 480 px centered dialog above that. Delete confirmation is a dialog, not `window.confirm`.
 - Money lines are stacked label/value pairs under 600 px and a three-column row from 600 px. Do not use a horizontal scrolling table for the agreement.
 

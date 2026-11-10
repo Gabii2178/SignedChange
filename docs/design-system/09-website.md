@@ -28,7 +28,7 @@ Section gap: 48 px mobile, 64 px desktop. Page margin: 16 / 24 / 32 px.
 | Product | How it works, what is stored, what verify shows, a sample PDF link that already exists |
 | Solutions | The four audiences, each linking to the app with the existing `template` query if that template exists |
 | Resources | Free tools, guides, blog. Tools stay browser-only calculators |
-| Pricing | The three plans below |
+| Pricing | The proposed comparison in [16-proposed-pricing.md](16-proposed-pricing.md). Not the live checkout |
 | About | Who operates the product, contact |
 | FAQ | The homepage questions plus signing and deletion |
 | Contact | The published support address already on the site. No new form that stores messages unless a later milestone adds an API |
@@ -36,15 +36,15 @@ Section gap: 48 px mobile, 64 px desktop. Page margin: 16 / 24 / 32 px.
 
 ## Pricing presentation
 
-Do not change amounts or what they buy.
+The cards in this blueprint are a **proposed display**. They are not wired to PayPal. The live source still sells Monthly at $9 and Lifetime at $49 once. That conflict is recorded in [17-billing-dependencies.md](17-billing-dependencies.md). Do not remove Lifetime from `site/` as part of a visual pass.
 
-| Plan | Price | What the card says |
-|---|---|---|
-| Free | $0 | 3 documents. The server counts creates, not files left after delete |
-| Pro Monthly | $9 per month | Unlimited documents while the subscription is active. Cancel in PayPal |
-| Pro Lifetime | $49 once | Unlimited documents for this account while the service runs |
+| Plan | Cadence | Struck comparison | Prominent price | Card copy |
+|---|---|---|---|---|
+| Free | None | None | $0 | 3 creates per account. The server also caps a network at 10 free creates in a calendar month. Delete does not restore a slot |
+| Pro Monthly | Every month | $9, the price in the current source | $5 per month | Unlimited documents while the subscription is active |
+| Pro Yearly | Every year | $60, labeled as $5 × 12, not a former yearly price | $49 per year | Replaces Lifetime in this proposal. Not a one-time purchase |
 
-Cards are equal height from 768 px. Lifetime has a “Best value” badge that is text, not a ribbon that covers the price. The buttons on the marketing page go to the app. The app’s existing PayPal buttons stay the payment UI. Do not redraw them as a new checkout.
+Cards are equal height from 768 px and stacked below that. Yearly is not lifted with a shadow. Each card says “Proposed — not for sale yet” and has no checkout control. The struck prices are real `<s>` text plus the comparison sentence, not color alone.
 
 ## Footer
 

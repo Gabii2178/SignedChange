@@ -39,7 +39,7 @@ Values were measured for WCAG 2.2 contrast. Pairs and ratios are in [08-accessib
 | Links | Blue, underlined in body copy |
 | Document states | See the status table in components. Always pair color with a word and an icon |
 | Signature | Navy dashed frame. Signed uses success. Not yet signed uses muted |
-| Payment display | The three current prices only. Amber is not a “pay” color. Pro is a navy badge plus the word Pro |
+| Payment display | Proposed cards only, inside this design system. Struck comparison in muted text with a line through it. Prominent price in navy. Amber is not a “pay” color. No PayPal button styling is changed |
 
 ## Dark theme
 

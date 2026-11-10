@@ -5,7 +5,7 @@ Do not start this until Milestone 3 is accepted. Milestone 4 is the frontend. It
 ## In scope
 
 1. Load `tokens.css` values into the marketing and app pages. Remove gradient logo usage from templates by pointing at the new SVG family. Leave the old files in `site/` until the templates no longer reference them, then stop using them. Do not edit `worker/src/paypal-rest.js`, IPN, `proStatus`, prices, or `GET /verify?ret=1`.
-2. Rebuild the marketing pages to the website blueprint: header, homepage sections, pricing cards with the current three amounts, FAQ, footer. Canonical copy may say `https://signedchange.com`. Do not change PayPal `return` or `notify_url`.
+2. Rebuild the marketing chrome to the website blueprint. Pricing cards on the live site stay the source prices ($9 a month and $49 Lifetime) until the billing migration in 17-billing-dependencies.md is separately authorized. The proposed $5 / $49-per-year comparison may appear only in design previews. Do not change PayPal `return` or `notify_url`.
 3. Replace the one-page `app.html` form with the five-step wizard. Submit the same `POST /doc/create` body.
 4. Rebuild `sign.html` so the review has no upsell. Keep hash, token, decline, and view-key behavior.
 5. Rebuild verify and the document list for `400`, `404`, `409`, `503`, `nextCursor`, and the status words in the component spec.

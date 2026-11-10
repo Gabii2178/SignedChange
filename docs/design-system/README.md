@@ -23,4 +23,6 @@ Public copy that is new uses `https://signedchange.com`. Existing PayPal return 
 | 15 | Decisions | [14-decisions.md](14-decisions.md) |
 | 16 | Milestone 4 roadmap | [15-milestone-4.md](15-milestone-4.md) |
 
+Proposed prices supersede the brief’s old presentation. The brief file is unchanged. See [PRICING-SUPERSESSION.md](PRICING-SUPERSESSION.md), [16-proposed-pricing.md](16-proposed-pricing.md), and [17-billing-dependencies.md](17-billing-dependencies.md).
+
 Machine-readable values: [tokens.css](tokens.css). Isolated previews: [preview/](preview/).
