@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mobile design reference</title>
+<link rel="stylesheet" href="../tokens.css">
+<style>
+  body { margin: 0; background: #d9e2ec; font-family: var(--sc-font); }
+  .banner { background: var(--sc-warning-bg); color: var(--sc-amber-ink); padding: 10px 16px; font-weight: 700; }
+  .phone { width: 360px; margin: 16px auto 32px; background: var(--sc-paper); color: var(--sc-ink); min-height: 700px; border: 8px solid var(--sc-navy); border-radius: 24px; overflow: hidden; }
+  header { height: 64px; background: var(--sc-navy); color: white; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+  header img { height: 32px; }
+  main { padding: 16px 16px 88px; }
+  h1 { font-size: 28px; line-height: 1.2; color: var(--sc-navy); margin: 0 0 8px; }
+  .step { font-weight: 700; margin: 0 0 12px; }
+  .sheet { background: white; border: 1px solid var(--sc-line); border-radius: 12px; padding: 16px; }
+  .badge { display: inline-block; background: var(--sc-info-bg); color: var(--sc-info); font-weight: 700; font-size: 12px; padding: 4px 8px; border-radius: 6px; }
+  .bar { position: sticky; bottom: 0; background: white; border-top: 1px solid var(--sc-line); display: flex; gap: 8px; padding: 12px 16px; }
+  button { flex: 1; height: 44px; border-radius: 8px; font-weight: 700; font-size: 16px; }
+  .sec { background: white; color: var(--sc-navy); border: 2px solid var(--sc-navy); }
+  .pri { background: var(--sc-navy); color: white; border: 0; }
+</style>
+</head>
+<body>
+<p class="banner">Design reference only. Not the live app. 360 px phone frame. No upsell on this review.</p>
+<div class="phone">
+  <header>
+    <img alt="SignedChange" src="../logo/horizontal-dark.svg">
+    <span>Menu</span>
+  </header>
+  <main>
+    <p class="step">Step 4 of 5 · Review</p>
+    <h1>Extra valve</h1>
+    <div class="sheet">
+      <p><span class="badge">Draft on this device</span></p>
+      <p><b>From</b><br>Ada, Owner</p>
+      <p><b>Other party</b><br>Bob</p>
+      <p>Add a valve. USD 200.00. The CO number is assigned when this is created.</p>
+      <p>I agree this change amends the original agreement. This is sample copy, not a customer record.</p>
+    </div>
+  </main>
+  <div class="bar">
+    <button class="sec" type="button">Back</button>
+    <button class="pri" type="button">Continue</button>
+  </div>
+</div>
+</body>
+</html>

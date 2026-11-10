@@ -1,0 +1,38 @@
+/* SignedChange 2.0 design tokens. Not imported by the live site. Milestone 4 may copy these values. */
+:root {
+  --sc-navy: #123B63;
+  --sc-ink: #17324A;
+  --sc-blue: #0F5F9E;
+  --sc-blue-deep: #0F4C81;
+  --sc-amber: #F0A202;
+  --sc-amber-ink: #8A5A00;
+  --sc-amber-deep: #7A4F00;
+  --sc-paper: #F5F7FA;
+  --sc-white: #FFFFFF;
+  --sc-muted: #5C6B7A;
+  --sc-line: #D5DEE7;
+  --sc-success: #0E6B45;
+  --sc-success-bg: #E7F6EE;
+  --sc-warning: #8A5A00;
+  --sc-warning-bg: #FFF6E0;
+  --sc-danger: #9E1B32;
+  --sc-danger-bg: #FDECEF;
+  --sc-info: #0F5F9E;
+  --sc-info-bg: #E7F1FA;
+  --sc-disabled: #5C6B7A;
+  --sc-disabled-bg: #EEF2F6;
+  --sc-focus: #0F5F9E;
+  --sc-space-1: 4px;
+  --sc-space-2: 8px;
+  --sc-space-3: 12px;
+  --sc-space-4: 16px;
+  --sc-space-5: 24px;
+  --sc-space-6: 32px;
+  --sc-space-7: 48px;
+  --sc-space-8: 64px;
+  --sc-radius-sm: 6px;
+  --sc-radius: 8px;
+  --sc-radius-lg: 12px;
+  --sc-font: "Noto Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+  --sc-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}

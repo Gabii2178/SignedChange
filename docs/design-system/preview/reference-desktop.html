@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desktop design reference</title>
+<link rel="stylesheet" href="../tokens.css">
+<style>
+  body { margin: 0; background: var(--sc-paper); color: var(--sc-ink); font-family: var(--sc-font); }
+  .banner { background: var(--sc-warning-bg); color: var(--sc-amber-ink); padding: 10px 32px; font-weight: 700; }
+  header { height: 64px; background: var(--sc-navy); display: flex; align-items: center; justify-content: space-between; padding: 0 32px; }
+  header img { height: 36px; }
+  nav a { color: white; text-decoration: none; margin-left: 24px; font-weight: 600; }
+  .hero { max-width: 1120px; margin: 48px auto; padding: 0 32px; display: grid; grid-template-columns: 1.2fr .8fr; gap: 32px; align-items: center; }
+  h1 { font-size: 40px; line-height: 1.15; color: var(--sc-navy); margin: 0 0 12px; }
+  .lead { font-size: 18px; line-height: 1.45; margin: 0 0 24px; }
+  .btn { display: inline-block; background: var(--sc-navy); color: white; padding: 12px 18px; border-radius: 8px; font-weight: 700; text-decoration: none; }
+  .btn.accent { background: var(--sc-amber); color: var(--sc-ink); margin-left: 12px; }
+  .sheet { background: white; border: 1px solid var(--sc-line); border-radius: 12px; padding: 24px; }
+  .sheet h2 { margin: 0 0 8px; font-size: 18px; }
+  .badge { display: inline-block; background: var(--sc-info-bg); color: var(--sc-info); font-weight: 700; font-size: 12px; padding: 4px 8px; border-radius: 6px; }
+  .prices { max-width: 1120px; margin: 0 auto 48px; padding: 0 32px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .card { background: white; border: 1px solid var(--sc-line); border-radius: 12px; padding: 24px; }
+  .card strong { font-size: 32px; }
+</style>
+</head>
+<body>
+<p class="banner">Design reference only. Not the live SignedChange site. Desktop layout at 1280 px.</p>
+<header>
+  <img alt="SignedChange" src="../logo/horizontal-dark.svg">
+  <nav>
+    <a href="https://signedchange.com">Product</a>
+    <a href="https://signedchange.com">Pricing</a>
+    <a class="btn accent" href="https://signedchange.com">Create a change record</a>
+  </nav>
+</header>
+<section class="hero">
+  <div>
+    <h1>When agreements change, make it official.</h1>
+    <p class="lead">Put the change in writing. Get both sides to sign. Keep a record you can both open.</p>
+    <a class="btn" href="https://signedchange.com">Create a change record</a>
+    <a class="btn accent" href="https://signedchange.com">See how it works</a>
+  </div>
+  <div class="sheet">
+    <h2>Extra valve and labour</h2>
+    <p><span class="badge">Waiting for signature</span></p>
+    <p>From Ada. Other party Bob. Amount USD 200.00. This sheet is sample copy, not a customer record.</p>
+  </div>
+</section>
+<section class="prices">
+  <article class="card"><h2>Free</h2><p><strong>$0</strong></p><p>3 documents.</p></article>
+  <article class="card"><h2>Pro Monthly</h2><p><strong>$9</strong></p><p>per month.</p></article>
+  <article class="card"><h2>Pro Lifetime</h2><p><strong>$49</strong></p><p>once.</p></article>
+</section>
+</body>
+</html>
