@@ -1,5 +1,7 @@
 // SignedChange worker: PayPal IPN (lifetime + monthly subscription) -> KV, accounts, documents, remote signing, server-side PDF.
 import * as D from './docs.js';
+import * as FX from './fx.js';
+import * as IDV from './identity.js';
 import * as PP from './paypal-rest.js';
 const enc = new TextEncoder();
 const hits = new Map(); // per-isolate rate limiter: ip -> {n, t}
@@ -199,21 +201,36 @@ export default {
     if (P.startsWith('/doc/') || P.startsWith('/account/')) {
       if (rateLimited('d:' + ip, 60)) return json({ ok: false, error: 'Too many requests, wait a minute.' }, 429, h);
       if (P === '/account/new' && req.method === 'POST') return D.newAccount(env, ipHash, h);
+      if (P === '/account/identity/provider' && req.method === 'POST') return IDV.providerResult(req, env, h);
       if (P === '/doc/get' && req.method === 'GET') { if (rateLimited('s:' + ip, 20)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return D.getForSigning(url, env, h); }
       if (P === '/doc/sign' && req.method === 'POST') { if (rateLimited('s:' + ip, 20)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return D.signDoc(req, env, h, ip, ipHash); }
       if (P === '/doc/pdf' && req.method === 'GET') return D.pdfResponse(req, url, env, h);
       if (P === '/doc/status' && req.method === 'GET') return D.docStatus(req, url, env, h);
       if (P === '/doc/decline' && req.method === 'POST') { if (rateLimited('s:' + ip, 20)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return D.declineDoc(req, env, h, ip, ipHash); }
+      if (P === '/doc/templates' && req.method === 'GET') return D.templateCatalogue(req, env, h);
+      if (P === '/doc/counter' && req.method === 'POST') { if (rateLimited('s:' + ip, 20)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return D.counterDoc(req, env, h, await D.auth(req, env)); }
+      if (P === '/doc/history' && req.method === 'GET') return D.historyDoc(req, url, env, h, await D.auth(req, env));
       if (P === '/doc/verify' && req.method === 'GET') { if (rateLimited('vf:' + ip, 30)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return D.verifyDoc(url, env, h); }
       const acct = await D.auth(req, env);
       if (!acct) return json({ ok: false, error: 'auth' }, 401, h);
       if (P === '/account/me' && req.method === 'GET') return D.me(env, acct, h, url);
+      if (P === '/account/identity' && req.method === 'GET') return IDV.read(env, acct, h);
+      if (P === '/account/identity/start' && req.method === 'POST') return IDV.start(req, env, acct, h);
       if (P === '/account/link' && req.method === 'POST') { if (rateLimited('l:' + ip, 10)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return linkToken(req, env, h, acct); }
       if ((P === '/account/paypal-order' || P === '/account/paypal-capture') && req.method === 'POST') { if (rateLimited('o:' + ip, 10)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return P === '/account/paypal-order' ? PP.createOrder(req, env, h, acct, json) : PP.captureOrder(req, env, h, acct, json); }
       if (P === '/account/paypal-sub' && req.method === 'POST') { if (rateLimited('p:' + ip, 10)) return json({ ok: false, error: 'Too many attempts, wait a minute.' }, 429, h); return PP.claimSub(req, env, h, acct, json); }
       if (P === '/doc/create' && req.method === 'POST') { if (rateLimited('c:' + ip, 15)) return json({ ok: false, error: 'Too many documents too fast, wait a minute.' }, 429, h); return D.createDoc(req, env, h, ip, ipHash, acct); }
       if (P === '/doc/cancel' && req.method === 'POST') return D.cancelDoc(req, env, h, acct);
+      if (P === '/doc/accept' && req.method === 'POST') return D.acceptDoc(req, env, h, acct);
       return json({ error: 'not found' }, 404, h);
+    }
+    if (P === '/fx/suggest' && req.method === 'GET') {
+      if (rateLimited('fx:' + ip, 30)) return json({ ok: false, error: 'Too many requests, wait a minute.' }, 429, h);
+      return FX.suggest(req, env, h);
+    }
+    if (P === '/fx/rates' && req.method === 'GET') {
+      if (rateLimited('fx:' + ip, 30)) return json({ ok: false, error: 'Too many requests, wait a minute.' }, 429, h);
+      return FX.rates(req, env, h);
     }
     if (req.method !== 'GET') return json({ error: 'method' }, 405, h);
     if (url.pathname === '/verify' || url.pathname === '/check') {

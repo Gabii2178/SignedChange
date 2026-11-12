@@ -53,8 +53,12 @@
   function validate(n) {
     clearStep(n);
     if (n === 1) {
+      const tpl = val('tpl');
+      const blank = !tpl || tpl === 'custom' || tpl.indexOf('u:') === 0;
+      if (!blank && !val('title')) return bad('title', window.scT ? scT('err.title') : 'This starting point needs a title.');
+      if (!blank && !val('job')) return bad('job', window.scT ? scT('err.job') : 'This starting point needs the job or contract.');
       if (!val('desc')) return bad('desc', window.scT ? scT('err.desc') : 'Describe what changed.');
-      if (PH.test(val('desc')) || PH.test(val('job'))) return bad('desc', window.scT ? scT('err.placeholders') : 'Replace the bracketed examples before you continue.');
+      if (PH.test(val('desc')) || PH.test(val('job')) || PH.test(val('title'))) return bad('desc', window.scT ? scT('err.placeholders') : 'Replace the bracketed examples before you continue.');
     }
     if (n === 2) {
       if (!val('biz')) return bad('biz', window.scT ? scT('err.biz') : 'Please type your name.');
@@ -63,7 +67,14 @@
     if (n === 3) {
       const dir = val('priceDir');
       const price = val('price');
+      const tpl = val('tpl');
+      const schedule = { jobschedule: 1, deadline: 1, deliverydate: 1, course: 1 };
+      const zeroOk = schedule[tpl];
+      const amount = Number(String(price).replace(',', '.'));
+      if (schedule[tpl] && !val('newDate')) return bad('newDate', window.scT ? scT('err.newDate') : 'This starting point needs the new date.');
+      if (val('tpl') === 'duration' && !val('newDate')) return bad('newDate', window.scT ? scT('err.newDate') : 'This starting point needs the new end date.');
       if (dir !== 'none' && !/^\d{1,9}([.,]\d{1,2})?$/.test(price)) return bad('price', window.scT ? scT('err.price') : 'Amount should be a number like 250 or 250.00.');
+      if (dir !== 'none' && amount === 0 && !zeroOk) return bad('price', window.scT ? scT('err.zero') : 'This starting point needs an amount greater than zero, or choose no price change.');
       if (val('origAmount') && !/^\d{1,9}([.,]\d{1,2})?$/.test(val('origAmount'))) return bad('origAmount', window.scT ? scT('err.orig') : 'Original amount should be a number like 5000.00.');
       if (val('taxRate') && !(/^\d{1,3}([.,]\d{1,3})?$/.test(val('taxRate')) && Number(val('taxRate').replace(',', '.')) <= 100)) return bad('taxRate', window.scT ? scT('err.tax') : 'Tax rate should be between 0 and 100.');
       if (val('payTerms') === 'custom' && !val('payCustom')) return bad('payCustom', window.scT ? scT('err.pay') : 'Describe the custom payment terms.');

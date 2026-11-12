@@ -17,6 +17,7 @@ function load(){fetch(API+'/doc/get?d='+encodeURIComponent(d)+'&t='+encodeURICom
   if(j._s===503){err('We can’t confirm this document right now.');$('retryGet').hidden=false;return}
   if(j._s===410){err(j.error||'This link is finished.');return}
   if(j._s===404){err('This signing link is not valid.');return}
+  if(j._s===403){err('You cannot open this document with this link.');return}
   return err(j.error||'This link is not valid.')}
  doc=j;const f=j.fields,c=f.currency;$('dt').textContent=f.title;
  const who=(n,co,r,ct)=>n+(r?', '+r:'')+(co?' – '+co:'')+(ct?' · '+ct:'');
@@ -33,7 +34,8 @@ function load(){fetch(API+'/doc/get?d='+encodeURIComponent(d)+'&t='+encodeURICom
   (j.attachments||[]).forEach((src,i)=>{if(!src)return;const im=document.createElement('img');im.src=src;im.alt='Attached photo '+(i+1);im.className='attimg';$('atts').appendChild(im)})}
  else rows.push(['Agreed amount',(c?c+' ':'')+f.price]);
  const dl_=$('rows');rows.forEach(([a,b])=>{const dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=a;dd.textContent=b;dl_.appendChild(dt);dl_.appendChild(dd)});
- $('cs').src=j.creatorSig;$('cs').hidden=false;$('csn').textContent='Signed by '+f.biz;$('name').value=f.client;$('exp').textContent=j.expires.slice(0,10);show('review');sz()}).catch(()=>err('Network error. Check your connection and reload.'))}
+ $('cs').src=j.creatorSig;$('cs').hidden=false;$('csn').textContent='Signed by '+f.biz;$('name').value=f.client;$('exp').textContent=j.expires.slice(0,10);try{document.documentElement.dataset.agreeCurrency=c||'';document.documentElement.dataset.agreeAmount=String(j.amounts&&j.amounts.tot!=null?j.amounts.tot:(f.price||''))}catch(e){}show('review');sz();if(window.scPaintFx)scPaintFx();paintVersions(j)}).catch(()=>err('Network error. Check your connection and reload.'))}
+function paintVersions(j){const label=$('verLabel'),list=$('verHist');if(!label||!list)return;label.textContent='Version '+(j.version||1)+'. You are reviewing this exact version.';list.textContent='';(j.history||[]).forEach(v=>{const li=document.createElement('li');li.textContent='Version '+v.n+' · '+(v.by==='invitee'?'invited person':'sender')+' · '+(v.action||'create')+' · '+(v.at||'').slice(0,10);list.appendChild(li)})}
 load();if($('retryGet'))$('retryGet').addEventListener('click',()=>{show('loading');load()});
 const c=$('sig'),x=c.getContext('2d');let dn=false,signed=false,typed=false;
 function sz(){const r=c.getBoundingClientRect();c.width=r.width*2;c.height=r.height*2;x.setTransform(2,0,0,2,0,0);x.lineWidth=2.5;x.lineCap='round'}
@@ -48,13 +50,18 @@ $('sign').addEventListener('click',async()=>{const m=s=>$('msg').textContent=s;m
  $('sign').disabled=true;$('sign').textContent='Signing…';
  try{const r=await fetch(API+'/doc/sign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({d,t,sig:o.toDataURL('image/png'),name:$('name').value.trim(),agree:true,hash:doc.hash,tz:TZ,typed})}),j=await r.json();
   if(j.ok)done(j.viewKey);
-  else if(r.status===409){m('The document changed or could not be checked. Reload the page.');$('sign').disabled=false;$('sign').textContent='Sign and agree'}
+  else if(r.status===409){m(j.error&&/this version/.test(j.error)?j.error:'The document changed or could not be checked. Reload the page.');$('sign').disabled=false;$('sign').textContent='Sign and agree'}
   else if(r.status===410){err(j.error||'This link is already finished.');}
   else if(r.status===503){m('We can’t confirm this document right now. You can try the same signature again.');$('sign').disabled=false;$('sign').textContent='Sign and agree'}
+  else if(r.status===403){m('You cannot sign this document with this link.');$('sign').disabled=false;$('sign').textContent='Sign and agree'}
   else if(r.status===400){m(j.error||'Name, signature, or consent is missing.');$('sign').disabled=false;$('sign').textContent='Sign and agree'}
   else{m(j.error||'Could not sign.');$('sign').disabled=false;$('sign').textContent='Sign and agree'}}catch(e){m('Network error, try again.');$('sign').disabled=false;$('sign').textContent='Sign and agree'}});
 $('decline').addEventListener('click',async()=>{const m=s=>$('dmsg').textContent=s;m('');const reason=$('reason').value.trim();if(reason.length<3){m('Please say what should change.');$('reason').focus();return}
  if(!confirm('Decline this document and send your reason to the sender?'))return;$('decline').disabled=true;
  try{const r=await fetch(API+'/doc/decline',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({d,t,reason,name:$('name').value.trim(),tz:TZ})}),j=await r.json();
   if(j.ok)show('declined');else if(r.status===400){m(j.error||'Please say what should change.');$('decline').disabled=false}else if(r.status===410){err('This link is already closed.');}else if(r.status===503){m('We can’t confirm this document right now.');$('decline').disabled=false}else{m(j.error||'Could not send.');$('decline').disabled=false}}catch(e){m('Network error, try again.');$('decline').disabled=false}});
+if($('counter'))$('counter').addEventListener('click',async()=>{const m=s=>$('cmsg').textContent=s;m('');if(!doc){m('This version is not open.');return}const desc=$('counterDesc').value.trim();if(desc.length<3){m('Describe the terms you propose.');$('counterDesc').focus();return}const price=$('counterPrice').value.trim()||'0';$('counter').disabled=true;
+ try{const fields={...doc.fields,desc,price};const r=await fetch(API+'/doc/counter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({d,t,baseHash:doc.hash,template:doc.template||'custom',fields})}),j=await r.json();
+  if(!j.ok||!j.signUrl){m(j.error||'This version was not saved.');$('counter').disabled=false;return}
+  location.assign(j.signUrl)}catch(e){m('Network error, try again.');$('counter').disabled=false}});
 })();

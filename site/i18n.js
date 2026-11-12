@@ -1,7 +1,8 @@
-/* English is the only active interface language. Other packs are stored outside the public pages. Agreement text still follows the agreement-language field, not this control. */
+/* Offered interface languages are English and French. Further packs stay unloaded until every interface string they would show is translated. Agreement text follows the agreement-language field, not this control. */
 (function () {
   var KEY = 'sc_lang';
-  var LOCALES = ['en', 'fr', 'es', 'de', 'it', 'pt', 'ar', 'ru', 'hi', 'bn', 'id', 'tr'];
+  var OFFERED = ['en', 'fr'];
+  var LOCALES = OFFERED;
   var RTL = { ar: 1 };
   var ENDONYM = { en: 'English', fr: 'Français', es: 'Español', de: 'Deutsch', it: 'Italiano', pt: 'Português', ar: 'العربية', ru: 'Русский', hi: 'हिन्दी', bn: 'বাংলা', id: 'Bahasa Indonesia', tr: 'Türkçe' };
   var listeners = [];
@@ -10,6 +11,7 @@
   function current() {
     try {
       var s = localStorage.getItem(KEY);
+      if (s === 'fr') return 'fr';
       if (s && s !== 'en') localStorage.setItem(KEY, 'en');
     } catch (e) {}
     return 'en';
@@ -97,9 +99,10 @@
     listeners.forEach(function (fn) { try { fn(lang); } catch (e) {} });
   }
   function scSetLang(lang) {
-    try { localStorage.setItem(KEY, 'en'); } catch (e) {}
+    var next = lang === 'fr' ? 'fr' : 'en';
+    try { localStorage.setItem(KEY, next); } catch (e) {}
     apply();
-    return 'en';
+    return next;
   }
   function scMissing() { return missing.slice(); }
   function scCoverage() {

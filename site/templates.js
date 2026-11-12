@@ -25,7 +25,7 @@
     box.hidden = false;
     box.textContent = '';
     const h = document.createElement('h3');
-    h.textContent = 'Preview';
+    h.textContent = window.scT ? scT('tpl.preview') : 'Preview';
     const use = document.createElement('p');
     use.textContent = t.use || '';
     const title = document.createElement('p');
@@ -33,8 +33,48 @@
     const body = document.createElement('p');
     body.textContent = t.blank ? 'Blank starting point.' : (t.desc || '');
     const note = document.createElement('p');
-    note.textContent = 'Starting point, not legal advice. Review it before anyone signs, and get professional advice when the change matters.';
+    note.textContent = window.scT ? scT('tpl.advice') : 'Starting point, not legal advice. Review it before anyone signs, and get professional advice when the change matters.';
     box.append(h, use, title, body, note);
+  }
+  function useTemplate(key) {
+    showPreview(key);
+    const sel = $('tpl');
+    if (!sel) return;
+    sel.value = key;
+    sel.dispatchEvent(new Event('change'));
+    if (sel.value !== key) return;
+    const box = document.getElementById('catalog');
+    if (box && box.tagName === 'DETAILS') box.open = false;
+    const title = $('title');
+    if (title) title.scrollIntoView({ block: 'center' });
+  }
+  function row(key, name) {
+    const t = tpl(key);
+    if (!t) return null;
+    const card = document.createElement('article');
+    card.className = 'tpl-row' + (t.blank ? ' tpl-blank' : '');
+    const copy = document.createElement('div');
+    const h = document.createElement('h3');
+    h.textContent = titleFor(key);
+    const p = document.createElement('p');
+    p.className = 'small';
+    p.textContent = t.use || name || '';
+    copy.append(h, p);
+    const actions = document.createElement('div');
+    actions.className = 'tpl-actions';
+    const preview = document.createElement('button');
+    preview.type = 'button';
+    preview.className = 'btn ghost';
+    preview.textContent = window.scT ? scT('tpl.preview') : 'Preview';
+    preview.addEventListener('click', () => showPreview(key));
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn secondary';
+    b.textContent = t.blank ? (window.scT ? scT('tpl.blank') : 'Start blank') : (window.scT ? scT('tpl.use') : 'Use this starting point');
+    b.addEventListener('click', () => useTemplate(key));
+    actions.append(preview, b);
+    card.append(copy, actions);
+    return card;
   }
   function render() {
     const list = $('tplList');
@@ -44,7 +84,7 @@
     cat.textContent = '';
     const all = document.createElement('option');
     all.value = 'all';
-    all.textContent = 'All categories';
+    all.textContent = window.scT ? scT('tpl.all') : 'All categories';
     cat.appendChild(all);
     CATS.forEach(([id, name]) => {
       const o = document.createElement('option');
@@ -57,99 +97,46 @@
     const chosen = cat.value || 'all';
     list.textContent = '';
     let shown = 0;
-    CATS.forEach(([id, name, keys]) => {
-      if (chosen !== 'all' && chosen !== id) return;
-      keys.forEach(key => {
-        const t = tpl(key);
-        if (!t) return;
-        const uiTitle = titleFor(key);
-        const blob = (name + ' ' + uiTitle + ' ' + (t.use || '') + ' ' + (t.desc || '') + ' ' + (t.job || '')).toLowerCase();
-        if (q && !blob.includes(q)) return;
-        shown += 1;
-        const card = document.createElement('article');
-        card.className = 'card';
-        const h = document.createElement('h3');
-        h.textContent = uiTitle;
-        const catp = document.createElement('p');
-        catp.className = 'small';
-        catp.textContent = name;
-        const p = document.createElement('p');
-        p.textContent = t.use || '';
-        const advice = document.createElement('p');
-        advice.className = 'small';
-        advice.textContent = 'Starting point, not legal advice.';
-        const preview = document.createElement('button');
-        preview.type = 'button';
-        preview.className = 'btn ghost';
-        preview.textContent = 'Preview';
-        preview.addEventListener('click', () => showPreview(key));
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'btn secondary';
-        b.textContent = t.blank ? 'Start blank' : 'Use this starting point';
-        b.addEventListener('click', () => {
-          showPreview(key);
-          const sel = $('tpl');
-          if (!sel) return;
-          sel.value = key;
-          sel.dispatchEvent(new Event('change'));
-          if (sel.value !== key) return;
-          const box = document.getElementById('catalog');
-          if (box && box.tagName === 'DETAILS') box.open = false;
-          const title = $('title');
-          if (title) title.scrollIntoView({ block: 'center' });
-        });
-        card.append(h, catp, p, advice, preview, b);
-        list.appendChild(card);
-      });
-    });
     const blank = tpl('custom');
-    if (blank && (chosen === 'all' || chosen === 'general')) {
-      const uiTitle = titleFor('custom');
-      const blob = ('blank ' + uiTitle + ' ' + (blank.use || '')).toLowerCase();
+    if (blank && chosen === 'all') {
+      const blob = ('blank ' + titleFor('custom') + ' ' + (blank.use || '')).toLowerCase();
       if (!q || blob.includes(q)) {
-        shown += 1;
-        const card = document.createElement('article');
-        card.className = 'card';
-        const h = document.createElement('h3');
-        h.textContent = uiTitle;
-        const catp = document.createElement('p');
-        catp.className = 'small';
-        catp.textContent = 'Blank';
-        const p = document.createElement('p');
-        p.textContent = blank.use || '';
-        const advice = document.createElement('p');
-        advice.className = 'small';
-        advice.textContent = 'Starting point, not legal advice.';
-        const preview = document.createElement('button');
-        preview.type = 'button';
-        preview.className = 'btn ghost';
-        preview.textContent = 'Preview';
-        preview.addEventListener('click', () => showPreview('custom'));
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'btn secondary';
-        b.textContent = 'Start blank';
-        b.addEventListener('click', () => {
-          showPreview('custom');
-          const sel = $('tpl');
-          if (!sel) return;
-          sel.value = 'custom';
-          sel.dispatchEvent(new Event('change'));
-          if (sel.value !== 'custom') return;
-          const box = document.getElementById('catalog');
-          if (box) box.open = false;
-          const title = $('title');
-          if (title) title.scrollIntoView({ block: 'center' });
-        });
-        card.append(h, catp, p, advice, preview, b);
-        list.appendChild(card);
+        const card = row('custom', 'Blank');
+        if (card) { list.appendChild(card); shown += 1; }
       }
     }
+    CATS.forEach(([id, name, keys]) => {
+      if (chosen !== 'all' && chosen !== id) return;
+      const matches = keys.filter(key => {
+        const t = tpl(key);
+        if (!t) return false;
+        const blob = (name + ' ' + titleFor(key) + ' ' + (t.use || '') + ' ' + (t.desc || '') + ' ' + (t.job || '')).toLowerCase();
+        return !q || blob.includes(q);
+      });
+      if (!matches.length) return;
+      const sec = document.createElement('details');
+      sec.className = 'tpl-sec';
+      sec.open = chosen !== 'all' || !!q;
+      const summary = document.createElement('summary');
+      const label = document.createElement('span');
+      label.textContent = window.scT ? scT('cat.' + id) : name;
+      const count = document.createElement('span');
+      count.className = 'tpl-count';
+      count.textContent = String(matches.length);
+      summary.append(label, count);
+      sec.appendChild(summary);
+      matches.forEach(key => {
+        const card = row(key, name);
+        if (!card) return;
+        sec.appendChild(card);
+        shown += 1;
+      });
+      list.appendChild(sec);
+    });
     if (!shown) {
       const empty = document.createElement('p');
       empty.id = 'tplEmpty';
-      empty.textContent = 'No starting points match that search.';
+      empty.textContent = window.scT ? scT('tpl.none') : 'No starting points match that search.';
       list.appendChild(empty);
     }
   }

@@ -16,29 +16,42 @@
   <a class="brand" href="index.html"><img src="brand/horizontal-dark.svg" alt="SignedChange" width="210" height="32"></a>
 <div class="prefs"><label class="prefs-label"><span data-i18n="pref.lang">Language</span> <select id="sc-lang" aria-label="Language"><option value="en">English</option><option value="fr">Français</option></select></label><label class="prefs-label"><span data-i18n="pref.theme">Theme</span> <select id="sc-theme" aria-label="Theme"><option value="system" data-i18n="theme.system">System</option><option value="light" data-i18n="theme.light">Light</option><option value="dark" data-i18n="theme.dark">Dark</option></select></label></div></header>
 <main id="main" class="wrap narrow section">
-<p id="loading" role="status">Loading the agreement…</p>
+<p id="loading" role="status" data-i18n="sign.loading">Loading the agreement…</p>
 <section id="review" hidden>
   <article class="sheet">
     <h1 id="dt">Change</h1>
     <p id="cono"></p>
     <dl id="rows" class="rows"></dl>
     <div id="totals" hidden></div>
+    <p id="fxApprox" class="help"></p>
     <div id="atts"></div>
     <img id="cs" alt="Signature of the person who created this change" hidden>
     <p id="csn"></p>
     <p id="agreetxt" hidden></p>
     <p id="agreeLang" class="help"></p>
   </article>
-  <label for="name">Your full name</label>
+  <label for="name" data-i18n="sign.name">Your full name</label>
   <input id="name" maxlength="120" autocomplete="name">
-  <h2>Your signature</h2>
+  <h2 data-i18n="sign.yours">Your signature</h2>
   <canvas id="sig" class="sig" width="600" height="200" aria-label="Your signature"></canvas>
-  <p><button type="button" class="btn secondary" id="clear">Clear</button> <button type="button" class="btn secondary" id="typeSig">Type my name instead</button></p>
-  <label for="agree"><input type="checkbox" id="agree"> <span id="agreeL">I agree to the statement above and sign this change electronically.</span></label>
+  <p><button type="button" class="btn secondary" id="clear" data-i18n="app.clear">Clear</button> <button type="button" class="btn secondary" id="typeSig" data-i18n="app.typeMe">Type my name instead</button></p>
+  <label for="agree"><input type="checkbox" id="agree"> <span id="agreeL" data-i18n="app.agreeBox">I agree to the statement above and sign this change electronically.</span></label>
   <p id="msg" class="ferr" role="alert"></p>
-  <p><button type="button" class="btn primary" id="sign">Sign and agree</button></p>
+  <p><button type="button" class="btn primary" id="sign" data-i18n="sign.submit">Sign and agree</button></p>
+  <details id="counterBox">
+    <summary data-i18n="sign.propose">Propose different terms</summary>
+    <p id="verLabel" class="help"></p>
+    <ol id="verHist"></ol>
+    <label for="counterDesc">What you propose instead</label>
+    <textarea id="counterDesc" maxlength="3000"></textarea>
+    <label for="counterPrice">Amount</label>
+    <input id="counterPrice" inputmode="decimal" value="0">
+    <p id="cmsg" class="ferr" role="alert"></p>
+    <button type="button" class="btn secondary" id="counter">Send this version</button>
+    <p class="help">This keeps every earlier version. The sender must sign the new one before you can.</p>
+  </details>
   <details id="declineBox">
-    <summary>Decline instead</summary>
+    <summary data-i18n="sign.declineInstead">Decline instead</summary>
     <label for="reason">What should change</label>
     <textarea id="reason" maxlength="500"></textarea>
     <p id="dmsg" class="ferr" role="alert"></p>
@@ -51,7 +64,7 @@
   <p>Your reason was sent. This link is finished.</p>
 </section>
 <section id="done" hidden>
-  <h1>Signed</h1>
+  <h1 data-i18n="status.signed">Signed</h1>
   <p>Keep this page. The view link in the address bar is how you download the PDF later. It is not emailed.</p>
   <button type="button" class="btn primary" id="dl">Download signed PDF</button>
 </section>
@@ -63,8 +76,9 @@
 </main>
 <script src="theme.js"></script>
 <script src="controls.js"></script>
-<script src="i18n/messages.js"></script>
+<script src="i18n/messages.js"></script><script src="i18n/fr.js"></script>
 <script src="i18n.js"></script>
 <script src="sign.js"></script>
+<script src="trust.js"></script>
 </body>
 </html>

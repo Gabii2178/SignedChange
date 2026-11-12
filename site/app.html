@@ -38,6 +38,24 @@
   <p><a class="btn accent" href="#create" data-i18n="app.new">New change record</a></p>
   <p id="count">Your first 3 documents are free.</p>
   <div id="listError" class="card" hidden role="alert"></div>
+  <div class="doc-tools">
+    <div>
+      <label for="docFind" data-i18n="list.find">Find on this page</label>
+      <input id="docFind" type="search" placeholder="Title, name or status">
+    </div>
+    <div>
+      <label for="docStatus" data-i18n="list.status">Status</label>
+      <select id="docStatus">
+        <option value="" data-i18n="list.all">All statuses</option>
+        <option value="pending" data-i18n="status.pending">Waiting for signature</option>
+        <option value="signed" data-i18n="status.signed">Signed</option>
+        <option value="declined" data-i18n="status.declined">Declined</option>
+        <option value="cancelled" data-i18n="status.cancelled">Cancelled</option>
+      </select>
+    </div>
+  </div>
+  <p id="listBusy" class="small" role="status" hidden>Loading your documents…</p>
+  <p id="docFindNote" class="small" role="status"></p>
   <div id="detail" class="sheet" hidden>
     <nav class="small" aria-label="Breadcrumb"><a href="#docs" data-i18n="nav.documents">Documents</a> <span aria-hidden="true">/</span> <span id="detailCrumb"></span></nav>
     <h2 id="detailTitle"></h2>
@@ -58,9 +76,8 @@
   <div id="formbox" class="narrow">
     <h1 data-i18n="app.new">New change record</h1>
     <details id="catalog" open>
-      <summary>Starting points</summary>
-      <h2>Starting points</h2>
-      <p>Examples you can edit. They are starting points, not legal advice, and they do not add hidden terms. Read the result and get professional advice when the change matters.</p>
+      <summary data-i18n="tpl.heading">Starting points</summary>
+      <p data-i18n="tpl.note">Examples you can edit. They are not legal advice and they add no hidden terms.</p>
       <label for="tplSearch" data-i18n="tpl.search">Search starting points</label>
       <input id="tplSearch" type="search">
       <label for="tplCat" data-i18n="tpl.filter">Category</label>
@@ -79,7 +96,7 @@
       <label for="title" data-i18n="app.title">Title</label>
       <input id="title" maxlength="80" value="Signed Change Record">
       <p id="title-e" class="ferr"></p>
-      <label for="job">Job or contract</label>
+      <label for="job" data-i18n="app.job">Job or contract</label>
       <input id="job" maxlength="160">
       <p id="job-e" class="ferr"></p>
       <label for="contractDate">Original agreement date</label>
@@ -102,7 +119,7 @@
       <input id="bizRole" maxlength="60">
       <label for="contact">Your phone or email</label>
       <input id="contact" maxlength="120" autocomplete="email">
-      <label for="client">Other party’s name</label>
+      <label for="client" data-i18n="app.client">Other party’s name</label>
       <input id="client" maxlength="120">
       <p id="client-e" class="ferr"></p>
       <label for="clientCo">Their company</label>
@@ -129,7 +146,7 @@
         <div id="lines"></div>
         <button type="button" class="btn secondary" id="addLine">Add a line</button>
       </details>
-      <label for="currency">Currency</label>
+      <label for="currency">Agreement currency</label>
       <select id="currency">
         <option>USD</option><option>EUR</option><option>GBP</option><option>XAF</option><option>NGN</option><option>GHS</option><option>KES</option><option>ZAR</option><option>CAD</option><option>AUD</option><option>INR</option>
       </select>
@@ -141,6 +158,7 @@
       <p id="origAmount-e" class="ferr"></p>
       <label for="newDate">New completion date</label>
       <input id="newDate" type="date">
+      <p id="newDate-e" class="ferr"></p>
       <label for="daysAdded">Days added</label>
       <input id="daysAdded" inputmode="numeric" value="0">
       <label for="payTerms">Payment due</label>
@@ -163,6 +181,7 @@
       <input id="date" type="date">
       <h3>Preview</h3>
       <div id="totals" class="card"></div>
+      <p id="fxApprox" class="help"></p>
       <label for="photos">Photos (optional, up to 3)</label>
       <input id="photos" type="file" accept="image/jpeg,image/png">
       <p id="photos-e" class="ferr"></p>
@@ -196,9 +215,9 @@
     <p id="draftNote" class="small">Draft on this device.</p>
     <button type="button" class="btn ghost" id="clearDraft">Clear draft</button>
     <div class="stepbar">
-      <button type="button" class="btn secondary" id="back">Back</button>
-      <button type="button" class="btn primary" id="next">Continue</button>
-      <button type="button" class="btn primary" id="gen" hidden>Create &amp; get signing link</button>
+      <button type="button" class="btn secondary" id="back" data-i18n="btn.back">Back</button>
+      <button type="button" class="btn primary" id="next" data-i18n="btn.next">Continue</button>
+      <button type="button" class="btn primary" id="gen" data-i18n="btn.createLink" hidden>Create &amp; get signing link</button>
     </div>
     <p id="msg" class="ferr" role="status" aria-live="polite"></p>
     <section id="share" hidden>
@@ -265,6 +284,27 @@
     <option value="dark" data-i18n="theme.dark">Dark</option>
   </select>
   <p class="help">The agreement sheet stays white in both themes. This choice stays on this device.</p>
+  <h2>Display currency</h2>
+  <p class="help">This is only for an approximate equivalent on screen. It does not change an agreement amount, its currency, or a signed record.</p>
+  <div id="fxSuggest" class="card" hidden>
+    <p id="fxSuggestText"></p>
+    <p>
+      <button type="button" class="btn secondary" id="fxAccept">Use this display currency</button>
+      <button type="button" class="btn ghost" id="fxDismiss">Keep the current display currency</button>
+    </p>
+  </div>
+  <label for="displayCcy">Display currency on this device</label>
+  <select id="displayCcy"></select>
+  <p id="fxMeta" class="help" role="status"></p>
+  <h2>Optional identity check</h2>
+  <div id="idv" class="card">
+    <p id="idvStatus">Not started</p>
+    <p class="help">This check is optional. You can create and open documents without it. A person invited to sign still uses the signing link, with no account and no identity check.</p>
+    <p class="help">SignedChange does not store an ID image or an ID number. Only an approved provider can return a verified result, and no provider is connected yet. The status stays separate from the public verify page.</p>
+    <label for="idvConsent"><input type="checkbox" id="idvConsent"> I agree to start an optional identity check. I can keep using this account either way.</label>
+    <p><button type="button" class="btn secondary" id="idvStart">Start optional check</button></p>
+    <p id="idvMsg" class="help" role="status"></p>
+  </div>
   <p><button type="button" class="btn ghost" id="cookie-settings">Cookie settings</button></p>
 </section>
 </main>
@@ -277,11 +317,12 @@
 </div>
 <script src="theme.js"></script>
 <script src="controls.js"></script>
-<script src="i18n/messages.js"></script>
+<script src="i18n/messages.js"></script><script src="i18n/fr.js"></script>
 <script src="i18n.js"></script>
 <script src="nav.js"></script>
 <script src="consent.js"></script>
 <script src="app.js"></script>
+<script src="trust.js"></script>
 <script src="templates.js"></script>
 <script src="wizard.js"></script>
 </body>

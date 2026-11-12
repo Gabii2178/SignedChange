@@ -15,7 +15,7 @@ const fields = { biz: 'Ada', contact: 'ada@x.com', client: 'Bob', clientContact:
 const A = a => ({ Authorization: `Bearer ${a.id}.${a.key}` });
 async function acct(m) { return J(await req(m, '/account/new', { method: 'POST' })); }
 async function create(m, a, f = {}) {
-  const r = await req(m, '/doc/create', { method: 'POST', headers: A(a), body: JSON.stringify({ v: 3, fields: { ...fields, ...f }, creatorSig: png, mode: 'remote' }) });
+  const r = await req(m, '/doc/create', { method: 'POST', headers: A(a), body: JSON.stringify({ v: 3, template: 'custom', fields: { ...fields, ...f }, creatorSig: png, mode: 'remote' }) });
   const j = await J(r);
   const u = new URL(String(j.signUrl || 'http://x/#d=&t=').replace('#', '?'));
   return { r, j, d: u.searchParams.get('d'), tk: u.searchParams.get('t') };

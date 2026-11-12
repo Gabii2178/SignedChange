@@ -1,4 +1,5 @@
 import { sendWelcome } from './email.js';
+import { resolveTemplate, schemaFor, unknownFields, missingRequired, publicSchema, fieldIssues, isIsoCurrency } from './template-schema.js';
 // SignedChange v2: accounts, server-side documents, remote signing, server-side PDF, subscriptions.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import qrcode from 'qrcode-generator';
@@ -80,6 +81,12 @@ export function attOk(d) {
   return { type: m[1], size: bin.length, data: d };
 }
 const DATE = /^\d{4}-\d{2}-\d{2}$/, NUM = /^\d{1,9}([.,]\d{1,2})?$/;
+function realDate(value) {
+  if (!DATE.test(value || '')) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
 export const PLACEHOLDER = /\[[^\]\n]{1,60}\]/g;
 const num = s => Math.round(parseFloat(String(s || '0').replace(',', '.')) * 100) / 100;
 const PAY = ['', 'completion', 'net7', 'net14', 'net30', 'custom'];
@@ -101,15 +108,17 @@ export function readFields(b) {
     if (o.priceDir === 'none') o.price = o.price || '0';
     if (o.origAmount && !NUM.test(o.origAmount)) return { error: 'Original contract amount should be a number like 5000.00.', field: 'origAmount' };
     if (o.taxRate && (!/^\d{1,3}([.,]\d{1,3})?$/.test(o.taxRate) || num(o.taxRate) > 100)) return { error: 'Tax rate should be a percentage between 0 and 100.', field: 'taxRate' };
-    if (o.newDate && !DATE.test(o.newDate)) return { error: 'New completion date is not valid.', field: 'newDate' };
-    if (o.contractDate && !DATE.test(o.contractDate)) return { error: 'Original agreement date is not valid.', field: 'contractDate' };
+    if (o.newDate && !realDate(o.newDate)) return { error: 'New completion date is not a real calendar date.', field: 'newDate' };
+    if (o.contractDate && !realDate(o.contractDate)) return { error: 'Original agreement date is not a real calendar date.', field: 'contractDate' };
     if (o.daysAdded === '') o.daysAdded = '0';
     if (!/^-?\d{1,4}$/.test(o.daysAdded)) return { error: 'Days added should be a whole number (0 if none).', field: 'daysAdded' };
     if (o.payTerms === 'custom' && !o.payCustom) return { error: 'Please describe the custom payment terms.', field: 'payCustom' };
   }
+  if (o.currency && !isIsoCurrency(o.currency)) return { error: 'Choose a real currency code, such as USD, EUR or XAF.', field: 'currency' };
   if (!o.biz || !o.client || !o.desc || !o.price) return { error: 'Please fill your name, the other party, what changed and the amount.' };
   if (!NUM.test(o.price)) return { error: 'Amount should be a number like 250 or 250.00.', field: 'price' };
-  if (!DATE.test(o.date)) o.date = new Date().toISOString().slice(0, 10);
+  if (o.date && !realDate(o.date)) return { error: 'The date is not a real calendar date.', field: 'date' };
+  if (!o.date) o.date = new Date().toISOString().slice(0, 10);
   const ph = [...new Set([o.title, o.job, o.desc, o.payCustom || ''].join('\n').match(PLACEHOLDER) || [])];
   if (ph.length) return { error: 'Please replace the template placeholders first: ' + ph.slice(0, 5).join(', '), field: 'desc', placeholders: ph };
   if (v3 && b.mode !== 'inperson') {
@@ -157,7 +166,11 @@ export async function contentHash(doc) {
   if (doc.v !== 3) return sha256hex(JSON.stringify([f.title, f.biz, f.contact, f.client, f.job, f.desc, f.price, f.currency, f.date]));
   return sha256hex(JSON.stringify(['v3', V3KEYS.map(k => f[k] == null ? '' : f[k]), doc.coNo, doc.agreeText, (doc.atts || []).map(a => a.hash), doc.creatorSigHash]));
 }
-export const finalHash = doc => sha256hex(JSON.stringify(['final-v3', doc.hash, doc.creatorSigHash, doc.otherSigHash, doc.signerName, doc.signedAt]));
+export async function finalHash(doc) {
+  const parts = ['final-v3', doc.hash, doc.creatorSigHash, doc.otherSigHash, doc.signerName, doc.signedAt];
+  if (doc.ownerSig) parts.push(await sha256hex(b64bytes(doc.ownerSig)));
+  return sha256hex(JSON.stringify(parts));
+}
 
 const T = {
   en: { draft: 'DRAFT - AWAITING SIGNATURE OF ', declined: 'DECLINED BY ', co: 'Change order #', date: 'Date', from: 'From', other: 'Other party', job: 'Job / contract', cdate: 'Original agreement dated',
@@ -184,8 +197,8 @@ export async function renderPdf(doc, opts = {}) {
   const footer = p => {
     if (doc.tier === 'free') {
       p.drawRectangle({ x: 0, y: 0, width: 595, height: 34, color: rgb(0.93, 0.96, 1) });
-      p.drawText('Made with SignedChange - try free at signedchange-app.surge.sh', { x: 297 - R.widthOfTextAtSize('Made with SignedChange - try free at signedchange-app.surge.sh', 10) / 2, y: 13, size: 10, font: B, color: blue });
-    } else { const s = 'signedchange-app.surge.sh', w = R.widthOfTextAtSize(s, 7), pw = B.widthOfTextAtSize('PRO', 6) + 10, x0 = 297 - (w + 6 + pw) / 2;
+      p.drawText('Made with SignedChange - try free at signedchange.com', { x: 297 - R.widthOfTextAtSize('Made with SignedChange - try free at signedchange.com', 10) / 2, y: 13, size: 10, font: B, color: blue });
+    } else { const s = 'signedchange.com', w = R.widthOfTextAtSize(s, 7), pw = B.widthOfTextAtSize('PRO', 6) + 10, x0 = 297 - (w + 6 + pw) / 2;
       p.drawText(s, { x: x0, y: 14, size: 7, font: R, color: grey });
       p.drawRectangle({ x: x0 + w + 6, y: 11.5, width: pw, height: 10, color: rgb(0.96, 0.65, 0.14), opacity: 0.9 });
       p.drawText('PRO', { x: x0 + w + 11, y: 14.3, size: 6, font: B, color: rgb(0.35, 0.23, 0) }); }
@@ -231,7 +244,7 @@ export async function renderPdf(doc, opts = {}) {
   await sigBox(L.sigC, f.biz, doc.creatorSig, doc.created, X);
   await sigBox(L.sigO, doc.signerName || f.client, doc.otherSig, doc.signedAt, X + 265);
   y -= 130;
-  const verifyUrl = (opts.site || 'https://signedchange-app.surge.sh') + '/verify.html?id=' + doc.id;
+  const verifyUrl = (opts.site || 'https://signedchange.com') + '/verify.html?id=' + doc.id;
   need(v3 ? 215 : 110);
   const qy = y; text(L.audit, { size: 9, bold: true, color: grey });
   const ut = s => s ? s.replace('T', ' ').slice(0, 19) + ' UTC' : '';
@@ -273,7 +286,21 @@ const ua = req => cleanLine(req.headers.get('User-Agent'), 200);
 const tzOk = s => /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$|^UTC[+-]?\d{0,2}(:\d\d)?$/.test(s || '') ? s.slice(0, 60) : '';
 export async function createDoc(req, env, h, ip, ipHash, acct) {
   let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
+  if (b.template == null || String(b.template).trim() === '') return json({ ok: false, error: 'Choose a starting point.', field: 'tpl' }, 400, h);
+  const template = resolveTemplate(b.template);
+  if (!template) return json({ ok: false, error: 'That starting point is not recognized.', field: 'tpl' }, 400, h);
+  const extra = unknownFields(b.fields);
+  if (extra.length) return json({ ok: false, error: 'The field "' + extra[0] + '" is not part of this starting point.', field: extra[0] }, 400, h);
+  const schema = schemaFor(template);
+  if (template !== 'custom') {
+    if (!String(b.fields && b.fields.title || '').trim()) return json({ ok: false, error: 'This starting point needs a title.', field: 'title' }, 400, h);
+    if (!String(b.fields && b.fields.job || '').trim()) return json({ ok: false, error: 'This starting point needs the job or contract.', field: 'job' }, 400, h);
+  }
   const rf = readFields(b); if (rf.error) return json({ ok: false, error: rf.error, field: rf.field, placeholders: rf.placeholders }, 400, h);
+  const missing = missingRequired(schema, rf.f).filter(key => key !== 'title' && key !== 'job');
+  if (missing.length) return json({ ok: false, error: 'This starting point needs ' + missing[0] + '.', field: missing[0] }, 400, h);
+  const issues = fieldIssues(schema, rf.f);
+  if (issues.length) return json({ ok: false, error: issues[0].error, field: issues[0].field }, 400, h);
   const creatorSig = pngOk(b.creatorSig); if (!creatorSig) return json({ ok: false, error: 'Your signature is required.', field: 'sigMe' }, 400, h);
   const mode = b.mode === 'inperson' ? 'inperson' : 'remote';
   let otherSig = null; if (mode === 'inperson') { otherSig = pngOk(b.otherSig); if (!otherSig) return json({ ok: false, error: 'The other party\'s signature is required.', field: 'sigOther' }, 400, h); }
@@ -302,14 +329,19 @@ export async function createDoc(req, env, h, ip, ipHash, acct) {
     doc.atts = [];
     for (let i = 0; i < atts.length; i++) { doc.atts.push({ type: atts[i].type, size: atts[i].size, hash: await sha256hex(b64bytes(atts[i].data)) }); await env.PAYMENTS.put(`att:${id}:${i}`, atts[i].data, { expirationTtl: DOC_TTL }); }
   }
+  doc.template = template;
+  doc.version = 1;
   doc.hash = await contentHash(doc);
+  doc.ownerApprovedHash = doc.hash;
   let signToken = null;
   if (mode === 'inperson') { doc.otherSig = otherSig; doc.signedAt = now; doc.signerName = rf.f.client; if (v3) { doc.otherSigHash = await sha256hex(b64bytes(otherSig)); doc.finalHash = await finalHash(doc); } }
   else { signToken = rand(24); doc.signHash = await sha256hex('sign-v1:' + signToken); doc.signExp = Date.now() + SIGN_DAYS * 86400e3; }
   await env.PAYMENTS.put('doc:' + id, JSON.stringify(doc), { expirationTtl: DOC_TTL });
+  await env.PAYMENTS.put('ver:' + id + ':1', JSON.stringify({ n: 1, parent: null, docId: id, by: 'owner', at: now, action: 'create', hash: doc.hash, template, fields: doc.fields }), { expirationTtl: DOC_TTL });
   await env.PAYMENTS.put(`adoc:${acct.id}:${(9e15 - Date.now()).toString().padStart(16, '0')}:${id}`, '1', { expirationTtl: DOC_TTL });
-  return json({ ok: true, id, coNo: doc.coNo || null, status: doc.status, hash: doc.hash, signUrl: signToken ? `${env.SITE_ORIGIN}/sign.html#d=${id}&t=${signToken}` : null, expires: doc.signExp ? new Date(doc.signExp).toISOString() : null }, 200, h);
+  return json({ ok: true, id, coNo: doc.coNo || null, status: doc.status, hash: doc.hash, version: 1, template, signUrl: signToken ? `${env.SITE_ORIGIN}/sign.html#d=${id}&t=${signToken}` : null, expires: doc.signExp ? new Date(doc.signExp).toISOString() : null }, 200, h);
 }
+export function templateCatalogue(_req, _env, h) { return json(publicSchema(), 200, h); }
 
 // Document lifecycle coordinator. See worker/DOC_LIFECYCLE.md.
 // Gift/payment locks use other Durable Object names and the claim/use operations; they do not enter here.
@@ -366,6 +398,18 @@ function signError(doc, body) {
   return null;
 }
 async function tokenOk(doc, token) { return !!doc && doc.signHash === await sha256hex('sign-v1:' + (token || '')); }
+async function exactSignReplay(doc, life, body) {
+  if (!doc || !life || life.status !== 'signed' || doc.status !== 'signed') return null;
+  if (!life.viewKey || !life.finalHash || doc.finalHash !== life.finalHash) return null;
+  if (!body || body.agree !== true || body.hash !== doc.hash) return null;
+  if (!(await tokenOk(doc, body.t))) return null;
+  const sig = pngOk(body.sig);
+  if (!sig || !life.sigHash) return null;
+  if (await sha256hex(b64bytes(sig)) !== life.sigHash) return null;
+  if (cleanLine(body.name, 120) !== life.signerName) return null;
+  if (doc.signedAt && life.signedAt && doc.signedAt !== life.signedAt) return null;
+  return { ok: true, status: 200, viewKey: life.viewKey, finalHash: life.finalHash };
+}
 async function buildSigned(doc, body, life) {
   const sig = pngOk(body.sig);
   const name = cleanLine(body.name, 120);
@@ -393,13 +437,16 @@ function buildDeclined(doc, body, life) {
   const declineReason = life && life.declineReason || reason;
   return { doc: { ...doc, status: 'declined', declineReason, declinedAt, declinedBy, signerIpHash: body.ipHash || doc.signerIpHash || '', signerUA: body.ua || doc.signerUA || '', signerTz: body.tz || '', lifeGen: life ? life.gen : 0 } };
 }
+function cancelClosed(status) {
+  if (status === 'signed') return 'Signing finished first. This document is signed, so it was not cancelled. Open the signed record instead of cancelling it.';
+  if (status === 'declined') return 'This document was declined, so cancel did not change it. Send a revised version if you still want a signature.';
+  if (status === 'cancelled') return 'This document is already cancelled. The signing link stays closed.';
+  return 'Only a document that is still waiting for a signature can be cancelled.';
+}
 function settled(life, action) {
   if (life.status === 'deleted') return { ok: false, status: 404, code: 'cancelled', error: 'Not found.' };
-  if (action === 'cancel') {
-    if (life.status === 'cancelled') return { ok: false, status: 409, error: 'Only unsigned documents can be cancelled.' };
-    return { ok: false, status: 409, error: 'Only unsigned documents can be cancelled.' };
-  }
-  if (action === 'delete') return life.status === 'deleted' ? { ok: false, status: 404, error: 'Not found.' } : { ok: false, status: 409, error: 'Only unsigned documents can be cancelled.' };
+  if (action === 'cancel') return { ok: false, status: 409, error: cancelClosed(life.status) };
+  if (action === 'delete') return life.status === 'deleted' ? { ok: false, status: 404, error: 'Not found.' } : { ok: false, status: 409, error: 'This document could not be deleted. Reload the list and try again.' };
   return { ok: false, status: 410, code: lifeCode(life.status) };
 }
 function kvMatches(doc, life) {
@@ -481,9 +528,20 @@ export async function runLifecycle(state, env, body) {
           await txn.delete(PENDING_SIG);
           return { type: 'write', life: next, success: { ok: true, status: 200 } };
         }
+        if (action === 'history' && observed) {
+          const invitee = await tokenOk(observed, body.t);
+          const owner = !!(body.acct && observed.acct === body.acct);
+          if (!invitee && !owner) return { type: 'respond', response: { ok: false, status: 404, error: 'Not found.' } };
+          const versions = (await txn.get('versions')) || [{ n: observed.version || 1, parent: null, docId: id, by: 'owner', at: observed.created, action: 'create', hash: observed.hash, template: observed.template || 'custom', fields: observed.fields }];
+          return { type: 'respond', response: { ok: true, status: 200, version: observed.version || 1, hash: observed.hash, history: versions.map(v => ({ n: v.n, parent: v.parent, by: v.by, at: v.at, action: v.action, hash: v.hash, template: v.template, fields: v.fields })) } };
+        }
         if (life.terminal && !kvMatches(observed, life)) return { type: 'repair', life };
         if (life.terminal && life.kvGen < life.gen) return { type: 'repair', life };
         if (life.terminal) return { type: 'settled', life };
+        if (action === 'invite') {
+          const ok = !!(observed && observed.signHash && observed.signHash === body.invite);
+          return { type: 'respond', response: { ok, status: ok ? 200 : 404, code: ok ? undefined : 'invalid' } };
+        }
         if (action === 'read' || action === 'peek') return { type: 'respond', response: { ok: true, status: 200, proceed: true } };
         if (!observed) return { type: 'respond', response: { ok: false, status: 503, code: 'visibility', error: 'Document coordination is unavailable. Please try again.' } };
         if ((action === 'cancel' || action === 'delete') && observed.acct !== body.acct) return { type: 'respond', response: { ok: false, status: 404, error: 'Not found.' } };
@@ -492,9 +550,37 @@ export async function runLifecycle(state, env, body) {
           const bad = signError(observed, body);
           if (bad) return { type: 'respond', response: { ok: false, ...bad } };
         }
-        const opId = await sha256hex('life:' + action + ':' + id + ':' + (body.t || '') + ':' + (body.reason || '') + ':' + (body.acct || ''));
+        const opId = await sha256hex('life:' + action + ':' + id + ':' + (body.t || '') + ':' + (body.baseHash || body.reason || '') + ':' + (body.acct || ''));
         const gen = (life.gen || 1) + 1;
+        if (action === 'history' || action === 'counter' || action === 'accept') {
+          const invitee = action !== 'accept' && await tokenOk(observed, body.t);
+          const owner = !!(body.acct && observed.acct === body.acct);
+          if (!invitee && !owner) return { type: 'respond', response: { ok: false, status: 404, error: 'Not found.' } };
+          let versions = (await txn.get('versions')) || [];
+          if (!versions.length) versions = [{ n: observed.version || 1, parent: null, docId: id, by: 'owner', at: observed.created, action: 'create', hash: observed.hash, template: observed.template || 'custom', fields: observed.fields }];
+          if (action === 'history') return { type: 'respond', response: { ok: true, status: 200, version: observed.version || 1, hash: observed.hash, history: versions.map(v => ({ n: v.n, parent: v.parent, by: v.by, at: v.at, action: v.action, hash: v.hash, template: v.template, fields: v.fields })) } };
+          if (action === 'accept') {
+            if (!owner || body.hash !== observed.hash || !pngOk(body.sig)) return { type: 'respond', response: { ok: false, status: 409, error: 'The sender can approve only the current version, and that approval needs a signature. Reload this version and approve it before the other person signs.' } };
+            const next = { ...life, gen, kvGen: life.kvGen || 0, status: 'pending', terminal: false, owner: observed.acct, opId, action: 'accept', version: observed.version || 1, versionHash: observed.hash };
+            await txn.put(LIFE, next);
+            await txn.put('pendingAccept', { hash: observed.hash, sig: body.sig, at: new Date().toISOString() });
+            versions.push({ n: observed.version || 1, parent: (observed.version || 1) > 1 ? (observed.version || 1) - 1 : null, docId: id, by: 'owner', at: new Date().toISOString(), action: 'accept', hash: observed.hash, template: observed.template || 'custom', fields: observed.fields });
+            await txn.put('versions', versions);
+            return { type: 'accept', life: next };
+          }
+          if (body.baseHash !== observed.hash || !body.nextHash || !body.nextFields || !body.signHash) return { type: 'respond', response: { ok: false, status: 409, error: 'This version already changed. Reload the page, read the current version, and propose again only if you still want a change.' } };
+          const currentN = observed.version || 1;
+          const by = owner && !invitee ? 'owner' : 'invitee';
+          const entry = { n: currentN + 1, parent: currentN, docId: id, by, at: new Date().toISOString(), action: 'counter', hash: body.nextHash, template: body.template || observed.template || 'custom', fields: body.nextFields };
+          versions.push(entry);
+          await txn.put('versions', versions);
+          const next = { gen, kvGen: life.kvGen || 0, status: 'pending', terminal: false, owner: observed.acct, opId, action: 'counter', version: entry.n, versionHash: body.nextHash };
+          await txn.put(LIFE, next);
+          await txn.put('pendingCounter', { entry, signHash: body.signHash, signExp: body.signExp, agreeText: body.agreeText || observed.agreeText, creatorSig: body.creatorSig || null, by });
+          return { type: 'counter', life: next, version: entry.n };
+        }
         if (action === 'sign') {
+          if (Object.prototype.hasOwnProperty.call(observed, 'ownerApprovedHash') && observed.ownerApprovedHash !== observed.hash) return { type: 'respond', response: { ok: false, status: 409, error: 'The sender has not signed this version yet. Wait for their approval, then sign this same version.' } };
           const built = await buildSigned(observed, body, null);
           if (built.status) return { type: 'respond', response: { ok: false, ...built } };
           const next = { gen, kvGen: life.kvGen || 0, status: 'signed', terminal: true, owner: observed.acct, opId, action, viewKey: built.viewKey, finalHash: built.finalHash, sigHash: built.sigHash, signerName: built.name, signedAt: built.signedAt, attCount: (observed.atts || []).length };
@@ -510,8 +596,8 @@ export async function runLifecycle(state, env, body) {
           return { type: 'write', life: next, success: { ok: true, status: 200 } };
         }
         if (action === 'cancel') {
-          if (observed.status !== 'pending') return { type: 'respond', response: { ok: false, status: 409, error: 'Only unsigned documents can be cancelled.' } };
-          const next = { gen, kvGen: life.kvGen || 0, status: 'cancelled', terminal: true, owner: observed.acct, opId, action, attCount: (observed.atts || []).length };
+          if (observed.status !== 'pending') return { type: 'respond', response: { ok: false, status: 409, error: cancelClosed(observed.status) } };
+          const next = { gen, kvGen: life.kvGen || 0, status: 'cancelled', terminal: true, owner: observed.acct, opId, action, attCount: (observed.atts || []).length, inviteHash: observed.signHash || '' };
           await txn.put(LIFE, next);
           return { type: 'write', life: next, success: { ok: true, status: 200 } };
         }
@@ -519,13 +605,44 @@ export async function runLifecycle(state, env, body) {
       });
       if (step.type === 'respond') return step.response;
       if (step.type === 'settled') {
+        if (action === 'invite') {
+          const ok = !!(step.life.inviteHash && step.life.inviteHash === body.invite);
+          return { ok, status: ok ? 200 : 404, code: ok ? undefined : 'invalid' };
+        }
         if (action === 'read' || action === 'peek') {
           if (step.life.status === 'deleted' && observed) { try { await eraseDoc(env, id, step.life.owner, step.life.attCount); } catch { /* read still reports the tombstone */ } }
           return { ok: step.life.status !== 'deleted', status: step.life.status === 'deleted' ? 404 : 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
         }
         const same = step.life.opId && step.life.kvGen < step.life.gen;
         if (same) return { ok: false, status: 503, code: 'kv' };
+        if (action === 'sign' && step.life.status === 'signed') {
+          const replay = await exactSignReplay(observed, step.life, body);
+          if (replay) return replay;
+        }
         return settled(step.life, action);
+      }
+      if (step.type === 'counter' || step.type === 'accept') {
+        try {
+          const pending = await state.storage.get(step.type === 'counter' ? 'pendingCounter' : 'pendingAccept');
+          const base = observed || await env.PAYMENTS.get('doc:' + id, 'json');
+          if (!base || !pending) throw new Error('kv-base');
+          if (step.type === 'accept') {
+            const next = { ...base, ownerApprovedHash: pending.hash, ownerSig: pending.sig };
+            await kvPutDoc(state, env, id, next);
+          } else {
+            const next = { ...base, fields: pending.entry.fields, template: pending.entry.template, version: pending.entry.n, hash: pending.entry.hash, agreeText: pending.agreeText, signHash: pending.signHash, signExp: pending.signExp, status: 'pending', ownerApprovedHash: pending.by === 'owner' ? pending.entry.hash : '' };
+            if (pending.creatorSig) { next.creatorSig = pending.creatorSig; next.creatorSigHash = await sha256hex(b64bytes(pending.creatorSig)); }
+            delete next.otherSig; delete next.otherSigHash; delete next.finalHash; delete next.signedAt; delete next.signerName;
+            await kvPutDoc(state, env, id, next);
+            const prior = await env.PAYMENTS.get('ver:' + id + ':' + pending.entry.n);
+            if (!prior) await env.PAYMENTS.put('ver:' + id + ':' + pending.entry.n, JSON.stringify(pending.entry), { expirationTtl: DOC_TTL });
+          }
+          const acked = await ackLife(state, step.life.gen);
+          if (!acked) continue;
+          await state.storage.delete('pendingCounter');
+          await state.storage.delete('pendingAccept');
+          return { ok: true, status: 200, version: step.life.version, hash: step.life.versionHash || (pending && pending.hash) };
+        } catch { return { ok: false, status: 503, code: 'kv', error: 'Document coordination is unavailable. Please try again.' }; }
       }
       const incomplete = step.life.kvGen < step.life.gen;
       try {
@@ -560,6 +677,16 @@ const SIGN_ERR = { invalid: 'This signing link is not valid.', used: 'This docum
 const loadAtts = async (env, doc) => Promise.all((doc.atts || []).map((_, i) => env.PAYMENTS.get(`att:${doc.id}:${i}`)));
 export async function getForSigning(url, env, h) {
   const d = url.searchParams.get('d');
+  const t = url.searchParams.get('t');
+  if (!ID.test(d || '') || !/^[\w-]{30,40}$/.test(t || '')) return json({ ok: false, error: SIGN_ERR.invalid, code: 'invalid' }, 404, h);
+  const tokenHash = await sha256hex('sign-v1:' + t);
+  const hinted = await env.PAYMENTS.get('doc:' + d, 'json');
+  if (!hinted) return json({ ok: false, error: SIGN_ERR.invalid, code: 'invalid' }, 404, h);
+  if (hinted.signHash && hinted.signHash !== tokenHash) return json({ ok: false, error: SIGN_ERR.invalid, code: 'invalid' }, 404, h);
+  if (!hinted.signHash) {
+    const known = await docCoord(env, d, { action: 'invite', invite: tokenHash });
+    if (!known.ok) return json({ ok: false, error: SIGN_ERR.invalid, code: 'invalid' }, 404, h);
+  }
   const gate = await docCoord(env, d, { action: 'read' });
   if (!gate.proceed) {
     const status = gate.status === 503 || gate.status === 404 || gate.status === 400 || gate.status === 409 ? gate.status : 410;
@@ -570,7 +697,51 @@ export async function getForSigning(url, env, h) {
   const { fields, creatorSig, created, signExp, hash, v, coNo, agreeText } = r.doc;
   const out = { ok: true, fields, creatorSig, created, expires: new Date(signExp).toISOString(), hash };
   if (v === 3) Object.assign(out, { v, coNo, agreeText, amounts: amounts(fields), attachments: await loadAtts(env, r.doc) });
+  out.version = r.doc.version || 1;
+  out.template = r.doc.template || 'custom';
+  const hist = await docCoord(env, d, { action: 'history', t: url.searchParams.get('t') });
+  if (hist.ok && hist.history) out.history = hist.history.map(vrow => ({ n: vrow.n, by: vrow.by, at: vrow.at, action: vrow.action, hash: vrow.hash }));
   return json(out, 200, h);
+}
+export async function counterDoc(req, env, h, acct) {
+  let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
+  if (!ID.test(b.d || '')) return json({ ok: false, error: 'Not found.' }, 404, h);
+  const current = await env.PAYMENTS.get('doc:' + b.d, 'json');
+  if (!current) return json({ ok: false, error: 'Not found.' }, 404, h);
+  const template = resolveTemplate(b.template || current.template || 'custom');
+  if (!template) return json({ ok: false, error: 'That starting point is not recognized.', field: 'tpl' }, 400, h);
+  const extra = unknownFields(b.fields);
+  if (extra.length) return json({ ok: false, error: 'The field "' + extra[0] + '" is not part of this starting point.', field: extra[0] }, 400, h);
+  if (template !== 'custom') {
+    if (!String(b.fields && b.fields.title || '').trim()) return json({ ok: false, error: 'This starting point needs a title.', field: 'title' }, 400, h);
+    if (!String(b.fields && b.fields.job || '').trim()) return json({ ok: false, error: 'This starting point needs the job or contract.', field: 'job' }, 400, h);
+  }
+  const schema = schemaFor(template);
+  const rf = readFields({ v: current.v || 3, mode: 'remote', fields: b.fields });
+  if (rf.error) return json({ ok: false, error: rf.error, field: rf.field, placeholders: rf.placeholders }, 400, h);
+  const missing = missingRequired(schema, rf.f).filter(key => key !== 'title' && key !== 'job');
+  if (missing.length) return json({ ok: false, error: 'This starting point needs ' + missing[0] + '.', field: missing[0] }, 400, h);
+  const issues = fieldIssues(schema, rf.f);
+  if (issues.length) return json({ ok: false, error: issues[0].error, field: issues[0].field }, 400, h);
+  const draft = { ...current, fields: rf.f, template, agreeText: agreementText(rf.f, current.coNo || 1) };
+  draft.hash = await contentHash(draft);
+  const signToken = rand(24);
+  const signHash = await sha256hex('sign-v1:' + signToken);
+  const out = await docCoord(env, b.d, { action: 'counter', t: b.t, acct: acct && acct.id, baseHash: b.baseHash, nextHash: draft.hash, nextFields: rf.f, template, signHash, signExp: Date.now() + SIGN_DAYS * 86400e3, agreeText: draft.agreeText, creatorSig: pngOk(b.creatorSig) });
+  if (!out.ok) return coordOut(env, b.d, { ...out, h });
+  return json({ ok: true, version: out.version, hash: draft.hash, signUrl: `${env.SITE_ORIGIN}/sign.html#d=${b.d}&t=${signToken}` }, 200, h);
+}
+export async function acceptDoc(req, env, h, acct) {
+  let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
+  const out = await docCoord(env, b.d, { action: 'accept', acct: acct.id, hash: b.hash, sig: b.sig });
+  if (!out.ok) return coordOut(env, b.d, { ...out, h });
+  return json({ ok: true, version: out.version, hash: out.hash }, 200, h);
+}
+export async function historyDoc(req, url, env, h, acct) {
+  const d = url.searchParams.get('d');
+  const out = await docCoord(env, d, { action: 'history', t: url.searchParams.get('t'), acct: acct && acct.id });
+  if (!out.ok) return coordOut(env, d, { ...out, h });
+  return json({ ok: true, version: out.version, hash: out.hash, history: out.history || [] }, 200, h);
 }
 export async function signDoc(req, env, h, ip, ipHash) {
   let b; try { b = await req.json(); } catch { return json({ ok: false, error: 'Bad request.' }, 400, h); }
@@ -593,6 +764,9 @@ function gateDown(gate) {
 }
 async function fingerprintsMatch(env, doc) {
   if (!doc || !doc.hash || (await contentHash(doc)) !== doc.hash) return false;
+  if (doc.otherSig) {
+    if (!doc.otherSigHash || (await sha256hex(b64bytes(doc.otherSig))) !== doc.otherSigHash) return false;
+  } else if (doc.status === 'signed') return false;
   if (doc.finalHash) { if ((await finalHash(doc)) !== doc.finalHash) return false; }
   else if (doc.status === 'signed') return false;
   for (let i = 0; i < (doc.atts || []).length; i++) {

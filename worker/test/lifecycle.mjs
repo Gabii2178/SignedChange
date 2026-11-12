@@ -20,7 +20,7 @@ const fields = { biz: 'Ada', contact: 'ada@x.com', client: 'Bob', clientContact:
 async function acct(m) { return J(await req(m, '/account/new', { method: 'POST' })); }
 const A = a => ({ Authorization: `Bearer ${a.id}.${a.key}` });
 async function create(m, a) {
-  const r = await req(m, '/doc/create', { method: 'POST', headers: A(a), body: JSON.stringify({ v: 3, fields, creatorSig: png, mode: 'remote' }) });
+  const r = await req(m, '/doc/create', { method: 'POST', headers: A(a), body: JSON.stringify({ v: 3, template: 'custom', fields, creatorSig: png, mode: 'remote' }) });
   const j = await J(r);
   const u = new URL(String(j.signUrl || 'http://x/#d=&t=').replace('#', '?'));
   return { r, j, d: u.searchParams.get('d'), tk: u.searchParams.get('t') };
@@ -38,13 +38,16 @@ let g = await J(await req(m, `/doc/get?d=${c.d}&t=${c.tk}`)); t('10 signer can o
 {
   const two = await Promise.all([0, 1].map(() => sign(m, c.d, c.tk, { hash })));
   const st = [];
-  for (const r of two) st.push(r.status);
+  const bodies = [];
+  for (const r of two) { st.push(r.status); bodies.push(await J(r)); }
   st.sort((x, y) => x - y);
-  t('1 simultaneous sign: one 200 and one 410 (' + st.join(',') + ')', st[0] === 200 && st[1] === 410);
-  const win = two[0].status === 200 ? two[0] : two[1];
-  const wj = await J(win);
+  const wins = bodies.filter(b => b.viewKey);
+  const sameDecision = new Set(wins.map(b => b.viewKey)).size === 1 && new Set(wins.map(b => b.finalHash)).size === 1;
+  t('1 simultaneous sign is one signature (' + st.join(',') + ')', wins.length >= 1 && sameDecision && st.every(s => s === 200 || s === 410));
+  const wj = wins[0];
   const again = await sign(m, c.d, c.tk, { hash });
-  t('1 token stays one-time after both return', again.status === 410);
+  const againBody = await J(again);
+  t('1 exact retry returns the completed signature (' + again.status + ')', again.status === 200 && againBody.viewKey === wj.viewKey && againBody.finalHash === wj.finalHash);
   const kv = await m.getKVNamespace('PAYMENTS');
   const doc = JSON.parse(await kv.get('doc:' + c.d));
   t('1 one signed body', doc.status === 'signed' && doc.finalHash === wj.finalHash);
@@ -62,8 +65,10 @@ let g = await J(await req(m, `/doc/get?d=${c.d}&t=${c.tk}`)); t('10 signer can o
   const cancelWon = k.status === 200 && s.status === 410 && doc.status === 'cancelled' && !doc.signHash;
   t('2 sign versus cancel has one terminal result (' + s.status + '/' + k.status + '/' + doc.status + ')', signWon || cancelWon);
   const later = await sign(m, c.d, c.tk, { hash: c.j.hash });
+  const laterBody = await J(later);
   const after = JSON.parse(await kv.get('doc:' + c.d));
-  t('2 later sign does not flip the winner', later.status === 410 && after.status === doc.status);
+  const recovered = doc.status === 'signed' ? later.status === 200 && laterBody.finalHash === doc.finalHash : later.status === 410;
+  t('2 later sign does not flip the winner (' + later.status + ')', recovered && after.status === doc.status && after.finalHash === doc.finalHash && after.signedAt === doc.signedAt);
 }
 
 // 3. sign versus delete, then resurrection attempt
@@ -143,7 +148,9 @@ let g = await J(await req(m, `/doc/get?d=${c.d}&t=${c.tk}`)); t('10 signer can o
   const done = JSON.parse(await (await p2.getKVNamespace('PAYMENTS')).get('doc:' + made.d));
   t('9 retry after restart finishes one signed body (' + second.status + ')', second.status === 200 && sj.viewKey && done.status === 'signed' && done.lifeGen > 0);
   const third = await sign(p2, made.d, made.tk, { hash: made.j.hash });
-  t('9 settled retry is one-time', third.status === 410);
+  const tj = await J(third);
+  const done2 = JSON.parse(await (await p2.getKVNamespace('PAYMENTS')).get('doc:' + made.d));
+  t('9 settled retry returns the same completed signature (' + third.status + ')', third.status === 200 && tj.viewKey === sj.viewKey && tj.finalHash === sj.finalHash && done2.finalHash === done.finalHash && done2.signedAt === done.signedAt);
   await p2.dispose();
 }
 

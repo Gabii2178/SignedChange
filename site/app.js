@@ -146,7 +146,9 @@ const links=()=>{try{return JSON.parse(localStorage.getItem(LK))||{}}catch(e){re
 const seen=()=>{try{return JSON.parse(localStorage.getItem(SEEN))||{}}catch(e){return{}}};
 let pageCursors=[''],pageIndex=0;
 function showListError(t){const e=$('listError');if(!e)return;e.hidden=!t;e.textContent=t||'';}
-async function refresh(cursor){if(!acct){$('count').textContent=window.scT?scT('count.none'):'Your first 3 documents are free.';hist([]);showListError('');return}
+function setBusy(on){const b=$('listBusy');if(b)b.hidden=!on}
+async function refresh(cursor){setBusy(true);try{await refreshBody(cursor)}finally{setBusy(false)}}
+async function refreshBody(cursor){if(!acct){$('count').textContent=window.scT?scT('count.none'):'Your first 3 documents are free.';hist([]);showListError('');return}
  const path='/account/me'+(cursor?('?cursor='+encodeURIComponent(cursor)):'');
  const j=await api(path);
  if(j._s===401){localStorage.removeItem(AK);acct=null;return refresh()}
@@ -163,13 +165,14 @@ async function refresh(cursor){if(!acct){$('count').textContent=window.scT?scT('
  hist(j.docs,ch.map(d=>d.id));const nx={};j.docs.forEach(d=>nx[d.id]=d.status);localStorage.setItem(SEEN,JSON.stringify(nx));
  if($('nextPage')){$('nextPage').hidden=!j.nextCursor;$('nextPage').dataset.cursor=j.nextCursor||'';}
  if($('prevPage'))$('prevPage').hidden=pageIndex===0;}
+function applyDocFind(){const input=$('docFind');if(!input)return;const q=input.value.trim().toLowerCase();const st=$('docStatus')?$('docStatus').value:'';let all=0,n=0;document.querySelectorAll('#history .hdoc').forEach(el=>{all++;const show=(!q||(el.dataset.find||'').includes(q))&&(!st||el.dataset.status===st);el.hidden=!show;if(show)n++});const note=$('docFindNote');if(note)note.textContent=(q||st)&&all&&!n?'No documents on this page match that search.':'';}
 function hist(docs,fresh){fresh=fresh||[];const L=$('history');L.textContent='';if(!docs.length){const p=document.createElement('p');p.className='small';p.textContent=window.scT?scT('list.empty'):'No documents yet.';L.appendChild(p);return}const lk=links();
- docs.forEach(d=>{const c=document.createElement('div');c.className='card hdoc';const open=document.createElement('button');open.type='button';open.className='btn ghost';open.textContent=(d.coNo?'CO #'+d.coNo+' · ':'')+d.title+' – '+d.client;open.addEventListener('click',()=>showDetail(d));c.appendChild(open);
+ docs.forEach(d=>{const c=document.createElement('div');c.className='card hdoc';c.dataset.find=((d.title||'')+' '+(d.client||'')+' '+(d.status||'')+' '+(d.coNo||'')).toLowerCase();c.dataset.status=d.status||'';const open=document.createElement('button');open.type='button';open.className='btn ghost';open.textContent=(d.coNo?'CO #'+d.coNo+' · ':'')+d.title+' – '+d.client;open.addEventListener('click',()=>showDetail(d));c.appendChild(open);
   if(fresh.includes(d.id)){const nb=document.createElement('span');nb.className='badge wait';nb.textContent='NEW';open.appendChild(document.createTextNode(' '));open.appendChild(nb)}
   const label=window.scT&&['signed','pending','declined','cancelled'].includes(d.status)?scT('status.'+d.status):d.status;
   const st={signed:['ok',label],pending:['wait',label],declined:['no',label],cancelled:['off',label]}[d.status]||['off',d.status];
   const bd=document.createElement('span');bd.className='stb '+st[0];bd.textContent=st[1];const s=document.createElement('p');s.className='small';
-  const rawAmt=d.total!=null?d.total:d.price;const shown=window.scFormatMoney?scFormatMoney(Math.abs(Number(rawAmt)||0),d.currency):(d.currency||'')+' '+rawAmt;const sign=Number(rawAmt)<0?'−':Number(rawAmt)>0?'+':'';
+  const rawAmt=d.total!=null?d.total:d.price;c.dataset.currency=d.currency||'';c.dataset.amount=String(rawAmt==null?'':rawAmt);const shown=window.scFormatMoney?scFormatMoney(Math.abs(Number(rawAmt)||0),d.currency):(d.currency||'')+' '+rawAmt;const sign=Number(rawAmt)<0?'−':Number(rawAmt)>0?'+':'';
   const when=window.scFormatDay?scFormatDay(d.date):d.date;const exp=d.status==='pending'&&d.expires?(window.scFormatDay?scFormatDay(d.expires):d.expires.slice(0,10)):'';
   s.append(bd,document.createTextNode(` ${sign}${shown} · ${when}`+(exp?' · '+exp:'')));c.appendChild(s);
   if(d.status==='declined'&&d.declineReason){const q=document.createElement('blockquote');q.className='reason';q.textContent='Their reason: “'+d.declineReason+'”';c.appendChild(q)}
@@ -187,7 +190,7 @@ function hist(docs,fresh){fresh=fresh||[];const L=$('history');L.textContent='';
    const r=await api('/doc/cancel',{method:'POST',body:JSON.stringify({d:d.id,action:'delete'})});if(r.ok||r._s===404){const l=links();delete l[d.id];localStorage.setItem(LK,JSON.stringify(l));toast(r.ok?(window.scT?scT('delete.done'):'Document deleted.'):(window.scT?scT('delete.already'):'Already deleted.'));refresh()}else if(r._s===503)toast(window.scT?scT('delete.unknown'):"We can't confirm this document right now.");else if(r._s===401)toast(window.scT?scT('pdf.auth'):'This account key was not accepted.');else if(r._s===403)toast(window.scT?scT('pdf.forbid'):'This account cannot delete that document.');else toast(r.error||'Could not delete.');},1);
   c.lastChild.previousSibling.classList.add('danger');
   const vl=document.createElement('a');vl.href='verify.html?id='+d.id;vl.className='small vlink';vl.textContent='Public verify page';vl.target='_blank';vl.rel='noopener';c.appendChild(vl);
-  L.appendChild(c)})}
+  L.appendChild(c)});applyDocFind();if($('docFind')&&!$('docFind')._wired){$('docFind')._wired=1;$('docFind').addEventListener('input',applyDocFind);if($('docStatus'))$('docStatus').addEventListener('change',applyDocFind);}}
 async function showDetail(d){const box=$('detail');if(!box)return;box.hidden=false;$('history').hidden=true;$('detailTitle').textContent=d.title||'Document';$('detailCrumb').textContent=(d.title||'Document').slice(0,32);$('detailCrumb').title=d.title||'';
  const words={signed:'Signed',pending:'Waiting for signature',declined:'Declined',cancelled:'Cancelled'};$('detailBadge').innerHTML='';const b=document.createElement('span');b.className='badge '+({signed:'ok',pending:'wait',declined:'no',cancelled:'off'}[d.status]||'off');b.textContent=words[d.status]||d.status;$('detailBadge').appendChild(b);
  $('detailError').textContent='';$('detailBody').textContent='Checking this document…';
@@ -205,7 +208,7 @@ if($('detailClose'))$('detailClose').addEventListener('click',()=>{$('detail').h
 if($('nextPage'))$('nextPage').addEventListener('click',()=>{const c=$('nextPage').dataset.cursor;if(!c)return;pageCursors=pageCursors.slice(0,pageIndex+1);pageCursors.push(c);pageIndex++;refresh(c)});
 if($('prevPage'))$('prevPage').addEventListener('click',()=>{if(pageIndex<1)return;pageIndex--;refresh(pageCursors[pageIndex]||undefined)});
 function dup(d){if($('desc').value.trim()&&!confirm('Replace the form with a copy of this document?'))return;const f={...d.fields};
- setF({priceDir:'inc',payTerms:'',...f,date:new Date().toISOString().slice(0,10),lines:f.lines||[]});location.hash='create';toast(d.status==='declined'?'Copied. Edit it to address their reason, then sign and send again.':'Copied into the form. Edit and sign to create a new document.');hilite()}
+ setF({priceDir:'inc',payTerms:'',...f,date:new Date().toISOString().slice(0,10),lines:f.lines||[]});location.hash='create';toast(d.status==='signed'||d.status==='cancelled'?'Copied into a new form. The finished record is not changed.':d.status==='declined'?'Copied. Edit it to address their reason, then sign and send again.':'Copied into the form. Edit and sign to create a new document.');hilite()}
 async function dl(id){const r=await fetch(API+'/doc/pdf?d='+encodeURIComponent(id),{headers:H()});if(!r.ok){toast(r.status===409?"This copy doesn’t match the stored record.":r.status===503?"We can’t confirm this document right now.":r.status===404?'That PDF is not available.':r.status===401?'This account key was not accepted.':r.status===403?'This account cannot download that PDF.':'Could not download the PDF. Please try again.');return}
  const bl=await r.blob(),cd=r.headers.get('Content-Disposition')||'',m=/filename="([^"]+)"/.exec(cd),a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download=m?m[1]:'signedchange.pdf';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}
 let poll=0;
@@ -233,7 +236,7 @@ $('gen').addEventListener('click',async()=>{msg('');clearErr();const mode=modeSe
  if(f.payTerms==='custom'&&!f.payCustom)return ferr('payCustom','Describe the custom payment terms.');
  if(!me.signed)return ferr('sigMe','Please sign in the "Your signature" box (or tap "Type my name instead").');if(mode==='inperson'&&!other.signed)return ferr('sigOther','The other party must sign in their box.');
  g.disabled=true;g.textContent='Working…';
- try{await ensure();const j=await api('/doc/create',{method:'POST',body:JSON.stringify({v:3,tz:TZ,fields:f,creatorSig:me.url(),mode,otherSig:mode==='inperson'?other.url():undefined,attachments:photos.length?photos:undefined})});
+ try{await ensure();const tplKey=(ts.value||'custom').startsWith('u:')?'custom':(ts.value||'custom');const j=await api('/doc/create',{method:'POST',body:JSON.stringify({v:3,template:tplKey,tz:TZ,fields:f,creatorSig:me.url(),mode,otherSig:mode==='inperson'?other.url():undefined,attachments:photos.length?photos:undefined})});
   if(j._s===402){msg(j.message||'Free limit reached.');location.hash='buy'}
   else if(j._s===429){msg(window.scT?scT('limit.fast'):'Too many documents too fast.')}
   else if(j._s===503){msg(window.scT?scT('create.uncertain'):"We can't confirm this document right now.")}

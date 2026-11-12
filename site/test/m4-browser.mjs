@@ -18,7 +18,7 @@ const shots = '/tmp/m4-shots';
 mkdirSync(art, { recursive: true });
 mkdirSync(shots, { recursive: true });
 for (const f of readdirSync(art)) {
-  if (f.startsWith('signedchange-m4') || f === 'm4-screenshot-manifest.txt') unlinkSync(join(art, f));
+  if (f.startsWith('signedchange-m4') || f.startsWith('signedchange-m5') || f === 'm4-screenshot-manifest.txt') unlinkSync(join(art, f));
 }
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.pdf': 'application/pdf', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.webmanifest': 'application/manifest+json' };
 
@@ -35,6 +35,7 @@ const mf = new Miniflare({
     CURRENCY: 'USD',
     PAYPAL_VERIFY_URL: 'http://127.0.0.1:9/',
     TOKEN_SECRET: 'm4-local',
+    FX_STUB: JSON.stringify({ amount: 1, base: 'USD', date: '2026-11-09', rates: { EUR: 0.92, GBP: 0.78, CAD: 1.38, AUD: 1.52, INR: 83.5, ZAR: 18.1 } }),
   },
 });
 
@@ -110,9 +111,15 @@ window.fetch = function(url, opts){
   const u = String(url);
   const flag = sessionStorage.getItem('sc-mock');
   if (flag === 'me-503' && u.includes('/account/me')) return Promise.resolve(new Response(JSON.stringify({ok:false,error:'down'}), {status:503, headers:{'content-type':'application/json'}}));
+  if (flag === 'me-403' && u.includes('/account/me')) return Promise.resolve(new Response(JSON.stringify({ok:false}), {status:403, headers:{'content-type':'application/json'}}));
   if (flag === 'status-503' && u.includes('/doc/status')) return Promise.resolve(new Response(JSON.stringify({ok:false}), {status:503, headers:{'content-type':'application/json'}}));
   if (flag === 'pdf-409' && u.includes('/doc/pdf')) return Promise.resolve(new Response('no', {status:409}));
   if (flag === 'offline') return Promise.reject(new TypeError('Failed to fetch'));
+  if (flag === 'sign-slow' && u.includes('/doc/sign')) {
+    window.__signCalls = (window.__signCalls || 0) + 1;
+    return new Promise(res => setTimeout(() => res(new Response(JSON.stringify({ ok: false }), { status: 503, headers: { 'content-type': 'application/json' } })), 400));
+  }
+  if (flag === 'sign-403' && u.includes('/doc/sign')) return Promise.resolve(new Response(JSON.stringify({ ok: false }), { status: 403, headers: { 'content-type': 'application/json' } }));
   const next = opts ? Object.assign({}, opts) : {};
   const headers = new Headers(next.headers || {});
   const nip = sessionStorage.getItem('sc-test-ip');
@@ -212,6 +219,7 @@ await setSize(1280, 1000);
 await evalJs(`document.getElementById('gen').click()`);
 await evalJs(`new Promise(r => { const i = setInterval(() => { const s = document.getElementById('share'); if (s && !s.hidden) { clearInterval(i); r(); } }, 100); setTimeout(() => { clearInterval(i); r(); }, 8000); })`);
 const share = await evalJs(`({hidden: document.getElementById('share').hidden, link: document.getElementById('slink').value, msg: document.getElementById('msg').textContent})`);
+const signShot = share.link;
 t('create returns a signing link (' + share.msg + ')', share.hidden === false && share.link.includes('#d=') && share.link.includes('&t='));
 await evalJs(`sessionStorage.setItem('sc-mock','status-503')`);
 await evalJs(`new Promise(r => setTimeout(r, 5200))`);
@@ -254,7 +262,7 @@ const declinedUrl = await evalJs(`(async () => {
   const acct = JSON.parse(localStorage.getItem('sc_acct'));
   const c = document.createElement('canvas'); c.width = 140; c.height = 50;
   const x = c.getContext('2d'); x.fillStyle = '#111'; x.fillRect(0, 0, 140, 50);
-  const r = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Bob', clientContact: 'bob@example.com', desc: 'Decline this change', price: '10', currency: 'USD', date: '2026-11-07', title: 'Decline me' } }) });
+  const r = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, template: 'custom', mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Bob', clientContact: 'bob@example.com', desc: 'Decline this change', price: '10', currency: 'USD', date: '2026-11-07', title: 'Decline me' } }) });
   const j = await r.json();
   return j.signUrl || j.error || '';
 })()`);
@@ -265,6 +273,10 @@ if (String(declinedUrl).includes('#d=')) {
   await evalJs(`(async () => { window.confirm = () => true; document.getElementById('declineBox').open = true; document.getElementById('reason').value = 'Please reduce the scope'; document.getElementById('decline').click(); await new Promise(r => setTimeout(r, 800)); return document.getElementById('declined').hidden; })()`);
   const dec = await evalJs(`({ok: !document.getElementById('declined').hidden, dmsg: document.getElementById('dmsg').textContent, err: document.getElementById('errm').textContent, msg: document.getElementById('msg').textContent})`);
   t('decline closes the link (' + [dec.dmsg, dec.err, dec.msg].filter(Boolean).join(' | ') + ')', dec.ok === true);
+  await go(String(declinedUrl).replace('sign.html', 'sign.html?n=decline2'));
+  await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('declined').hidden || !document.getElementById('err').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 5000); })`);
+  const secondDecline = await evalJs(`({ review: !document.getElementById('review').hidden, declined: !document.getElementById('declined').hidden, err: document.getElementById('errm').textContent })`);
+  t('a second visit cannot decline again (' + secondDecline.err + ')', secondDecline.review === false && (secondDecline.declined === true || /declin|closed|finished/i.test(secondDecline.err)));
 }
 
 await go(ORIGIN + '/verify.html?id=not-a-real-id');
@@ -286,7 +298,7 @@ const pendingMade = await evalJs(`(async () => {
   const acct = JSON.parse(localStorage.getItem('sc_acct'));
   const c = document.createElement('canvas'); c.width = 140; c.height = 50;
   c.getContext('2d').fillRect(0, 0, 140, 50);
-  const r = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Cam', clientContact: 'cam@example.com', desc: 'Cancel this pending change', price: '15', currency: 'USD', date: '2026-11-07', title: 'Cancel me' } }) });
+  const r = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, template: 'custom', mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Cam', clientContact: 'cam@example.com', desc: 'Cancel this pending change', price: '15', currency: 'USD', date: '2026-11-07', title: 'Cancel me' } }) });
   const j = await r.json();
   return r.status + ' ' + (j.error || j.message || j.id || '');
 })()`);
@@ -294,6 +306,30 @@ t('pending document for cancel (' + pendingMade + ')', String(pendingMade).start
 await go(ORIGIN + '/app.html?list=2#docs');
 const listed = await evalJs(`new Promise(r => { const i = setInterval(() => { const t = document.getElementById('history').textContent; if (t.includes('Cancel me')) { clearInterval(i); r(t); } }, 100); setTimeout(() => { clearInterval(i); r(document.getElementById('history').textContent.slice(0, 240)); }, 3000); })`);
 t('pending row is listed (' + String(listed).slice(0, 120).replace(/\s+/g, ' ') + ')', String(listed).includes('Cancel me'));
+const docFind = await evalJs(`(() => {
+  const input = document.getElementById('docFind');
+  input.value = 'Cancel me';
+  input.dispatchEvent(new Event('input'));
+  const rows = [...document.querySelectorAll('#history .hdoc')];
+  const visible = rows.filter(r => !r.hidden).map(r => r.dataset.find);
+  const hidden = rows.filter(r => r.hidden).length;
+  input.value = '';
+  input.dispatchEvent(new Event('input'));
+  const restored = [...document.querySelectorAll('#history .hdoc')].filter(r => r.hidden).length;
+  return { visible, hidden, restored, note: document.getElementById('docFindNote').textContent };
+})()`);
+t('document page search keeps only the matching row (' + JSON.stringify(docFind.visible) + ')', docFind.visible.length === 1 && /cancel me/.test(docFind.visible[0]) && docFind.hidden >= 1 && docFind.restored === 0);
+const statusFilter = await evalJs(`(() => {
+  const sel = document.getElementById('docStatus');
+  sel.value = 'pending';
+  sel.dispatchEvent(new Event('change'));
+  const visible = [...document.querySelectorAll('#history .hdoc')].filter(r => !r.hidden);
+  const onlyPending = visible.every(r => r.dataset.status === 'pending');
+  sel.value = '';
+  sel.dispatchEvent(new Event('change'));
+  return { n: visible.length, onlyPending, busy: !!document.getElementById('listBusy') };
+})()`);
+t('status filter shows only waiting documents and a loading slot exists (' + statusFilter.n + ')', statusFilter.n >= 1 && statusFilter.onlyPending && statusFilter.busy);
 if (String(listed).includes('Cancel me')) {
   const cancel401 = await evalJs(`(async () => {
     const orig = window.fetch;
@@ -343,13 +379,31 @@ await evalJs(`document.getElementById('prevPage').click()`);
 await evalJs(`new Promise(r => setTimeout(r, 600))`);
 const backPage = await evalJs(`document.getElementById('history').innerText.slice(0, 80)`);
 t('previous page returns', backPage === firstPage);
+const filteredPage = await evalJs(`(async () => {
+  const marker = (document.getElementById('history').innerText.match(/PageRow\\d+/) || [''])[0];
+  document.getElementById('docFind').value = marker;
+  document.getElementById('docStatus').value = 'signed';
+  document.getElementById('docStatus').dispatchEvent(new Event('change'));
+  const note = document.getElementById('docFindNote').textContent;
+  const visible = [...document.querySelectorAll('#history .hdoc')].filter(el => !el.hidden).length;
+  document.getElementById('nextPage').click();
+  await new Promise(r => setTimeout(r, 700));
+  const leaked = !!(marker && document.getElementById('history').innerText.includes(marker));
+  document.getElementById('docFind').value = '';
+  document.getElementById('docStatus').value = '';
+  document.getElementById('docFind').dispatchEvent(new Event('input'));
+  document.getElementById('prevPage').click();
+  await new Promise(r => setTimeout(r, 700));
+  return { marker, note, visible, leaked, back: document.getElementById('history').innerText.includes(marker) };
+})()`);
+t('search plus status filter does not keep the previous page (' + JSON.stringify(filteredPage) + ')', !!filteredPage.marker && filteredPage.visible === 0 && /No documents on this page/.test(filteredPage.note) && filteredPage.leaked === false && filteredPage.back === true);
 
 const race = await evalJs(`(async () => {
   sessionStorage.setItem('sc-test-ip', 'race-net');
   const made = await fetch('/account/new', { method: 'POST' });
   const acct = await made.json();
   const c = document.createElement('canvas'); c.width = 140; c.height = 50; c.getContext('2d').fillRect(0, 0, 140, 50);
-  const created = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Race', clientContact: 'race@example.com', desc: 'Race this change', price: '12', currency: 'USD', date: '2026-11-07', title: 'Race me', lang: 'en' } }) });
+  const created = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, template: 'custom', mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Race', clientContact: 'race@example.com', desc: 'Race this change', price: '12', currency: 'USD', date: '2026-11-07', title: 'Race me', lang: 'en' } }) });
   const j = await created.json();
   const params = new URLSearchParams((j.signUrl || '').split('#')[1] || '');
   const d = params.get('d');
@@ -473,8 +527,8 @@ const homeEn = await evalJs(`({
   note: document.querySelector('.future-lang') && document.querySelector('.future-lang').textContent,
   names: document.querySelector('.lang-btn').parentElement.innerText
 })`);
-t('stored French is normalized to English and the homepage stays English (' + homeEn.h1 + ')', homeEn.lang === 'en' && homeEn.stored === 'en' && homeEn.h1.includes('make it official') && homeEn.packs === 'en' && homeEn.future === 'undefined');
-t('language menu offers English and one future note (' + homeEn.note + ')', homeEn.enabled.length === 1 && homeEn.enabled[0] === 'English' && homeEn.note === 'More languages later.' && !/Français|Español|Deutsch/.test(homeEn.names) && /English/.test(homeEn.langLabel));
+t('stored French stays selected and the homepage follows it (' + homeEn.h1 + ')', homeEn.lang === 'fr' && homeEn.stored === 'fr' && homeEn.h1.includes('rendez-le officiel') && homeEn.packs.includes('en') && homeEn.packs.includes('fr') && homeEn.future === 'undefined');
+t('language menu offers English and French only (' + homeEn.names + ')', homeEn.enabled.length === 2 && homeEn.enabled[0] === 'English' && homeEn.enabled[1] === 'Français' && !homeEn.note && !/Español|Deutsch|العربية/.test(homeEn.names) && /français/i.test(homeEn.langLabel));
 await setSize(1280, 800);
 await publish('signedchange-m4-home-light.png');
 await evalJs(`document.querySelector('[data-theme-choice="dark"]').click()`);
@@ -570,6 +624,67 @@ await evalJs(`document.getElementById('cc-reject') && document.getElementById('c
 await evalJs(`(() => { const cat = document.getElementById('tplCat'); cat.value = 'all'; cat.dispatchEvent(new Event('change')); document.getElementById('tplSearch').value = ''; document.getElementById('tplSearch').dispatchEvent(new Event('input')); })()`);
 const library = await evalJs(`({n: document.querySelectorAll('#tplList article').length, cats: document.getElementById('tplCat').options.length})`);
 t('template library has 46 starting points in 9 categories (' + library.n + '/' + library.cats + ')', library.n === 46 && library.cats === 10);
+const sections = await evalJs(`(() => {
+  const secs = [...document.querySelectorAll('#tplList details.tpl-sec')];
+  return { n: secs.length, counts: secs.map(s => s.querySelector('.tpl-count') && s.querySelector('.tpl-count').textContent), blank: !!document.querySelector('#tplList article.tpl-blank h3') && document.querySelector('#tplList article.tpl-blank h3').textContent };
+})()`);
+t('catalogue groups nine counted sections and pins Blank (' + sections.counts.join(',') + ')', sections.n === 9 && sections.counts.reduce((a, n) => a + Number(n), 0) === 45 && sections.blank === 'Blank (write your own)');
+const keyOpen = await evalJs(`(() => {
+  const s = document.querySelector('#tplList details summary');
+  s.focus();
+  const focused = document.activeElement === s;
+  s.click();
+  return { focused, open: s.parentElement.open, tag: s.tagName };
+})()`);
+t('category header is a keyboard-focusable summary and opens (' + keyOpen.tag + '/' + keyOpen.focused + '/' + keyOpen.open + ')', keyOpen.tag === 'SUMMARY' && keyOpen.focused === true && keyOpen.open === true);
+await evalJs(`document.querySelector('#tplList details').open = false`);
+for (const w of [360, 390, 768, 1280]) {
+  await setSize(w, 900);
+  for (const theme of ['light', 'dark']) {
+  await evalJs(`scSetTheme(${JSON.stringify(theme)}); window.scrollTo(0, 0)`);
+  const header = await evalJs(`(() => {
+    const box = sel => { const el = document.querySelector(sel); const r = el.getBoundingClientRect(); return { left: Math.round(r.left), top: Math.round(r.top), w: Math.round(r.width), show: getComputedStyle(el).display !== 'none' }; };
+    const logo = box('.brand');
+    const lang = box('.lang-btn');
+    const theme = box('.theme-btn');
+    const menu = box('#burger');
+    const mobile = innerWidth < 768;
+    const order = mobile ? logo.left < lang.left && lang.left < theme.left && theme.left < menu.left && menu.show : logo.left < lang.left && lang.left < theme.left && !menu.show;
+    return { order, overflow: document.documentElement.scrollWidth > innerWidth + 2, logo, lang, theme, menu, w: innerWidth };
+  })()`);
+  t('header order at ' + w + ' (' + JSON.stringify(header) + ')', header.order && header.overflow === false && header.lang.w >= 44 && header.theme.w >= 44);
+  const layout = await evalJs(`(() => {
+    const list = document.getElementById('tplList');
+    const lw = list.getBoundingClientRect().width;
+    const blocks = [...list.children].filter(el => el.matches('article, details'));
+    const ratios = blocks.map(el => Math.round(el.getBoundingClientRect().width / lw * 100));
+    const empty = blocks.filter(el => el.getBoundingClientRect().height < 20 || el.getBoundingClientRect().width < 20).length;
+    const globe = document.querySelector('.lang-btn svg').getBoundingClientRect();
+    const headerBox = document.querySelector('.site-nav').getBoundingClientRect();
+    const cta = document.querySelector('#menu .accent');
+    const cr = cta ? cta.getBoundingClientRect() : null;
+    const ctaInside = !cr || getComputedStyle(document.getElementById('menu')).display === 'none' || (cr.top >= headerBox.top - 1 && cr.bottom <= headerBox.bottom + 1 && cr.left >= headerBox.left - 1 && cr.right <= headerBox.right + 1 && cr.height >= 32 && cr.height <= headerBox.height + 1);
+    const nav = document.querySelector('.app-nav');
+    const link = nav.querySelector('a');
+    const nr = nav.getBoundingClientRect();
+    const lr = link.getBoundingClientRect();
+    const navBg = getComputedStyle(nav).backgroundColor;
+    return { ratios, empty, min: Math.min(...ratios), globe: Math.round(globe.width), ctaInside, ctaH: cr ? Math.round(cr.height) : 0, headerH: Math.round(headerBox.height), navH: Math.round(nr.height), linkH: Math.round(lr.height), navBg, linkColor: getComputedStyle(link).color };
+  })()`);
+  t('catalogue rows, header CTA and app nav at ' + w + ' ' + theme + ' (' + JSON.stringify(layout) + ')', layout.min >= 60 && layout.empty === 0 && layout.globe >= 16 && layout.ctaInside && layout.linkH >= 40 && layout.navBg !== 'rgba(0, 0, 0, 0)' && layout.navBg !== 'transparent');
+  await publish('signedchange-m5-catalogue-' + w + '-' + theme + '.png');
+  await evalJs(`(() => { const d = document.querySelector('#tplList details'); d.open = true; d.scrollIntoView({ block: 'start' }); })()`);
+  await evalJs(`new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
+  await publish('signedchange-m5-catalogue-' + w + '-' + theme + '-open.png');
+  await evalJs(`document.querySelector('#tplList details').open = false`);
+  }
+}
+await setSize(390, 900);
+await evalJs(`scSetTheme('dark'); window.scrollTo(0, 0)`);
+await publish('signedchange-m5-catalogue-390-dark.png');
+await setSize(1280, 900);
+await publish('signedchange-m5-catalogue-1280-dark.png');
+await evalJs(`scSetTheme('light')`);
 await publish('signedchange-m4-templates-light.png');
 await evalJs(`scSetTheme('dark')`);
 await evalJs(`new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
@@ -747,67 +862,222 @@ const catalogCount = await evalJs(`(() => { document.getElementById('catalog').o
 t('catalog stays 46 cards after the legacy restore (' + catalogCount + ')', catalogCount === 46);
 
 function placeOk(box) {
-  return box && box.inView && box.clear && box.h > 8;
+  return box && box.inView && box.clear && box.hit && box.h > 8;
 }
 for (const theme of ['light', 'dark']) {
-  await evalJs(`scSetTheme(${JSON.stringify(theme)})`);
+  await evalJs(`scSetTheme(${JSON.stringify(theme)}); document.documentElement.style.scrollBehavior = 'auto'`);
   for (const w of [320, 360, 390, 430, 1024, 1280]) {
-    await setSize(w, w >= 1024 ? 800 : 700);
+    await setSize(w, w >= 1024 ? 900 : 780);
     await evalJs(`new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))`);
     const card = await evalJs(`(() => {
+      document.documentElement.style.scrollBehavior = 'auto';
       const bar = document.querySelector('.stepbar');
       const list = document.getElementById('tplList');
       document.getElementById('catalog').open = true;
-      list.scrollTop = list.scrollHeight;
-      const last = list.querySelector('article:last-child');
+      window.scrollTo(0, 0);
+      const last = [...list.querySelectorAll('article')].pop();
+      const parent = last.closest('details');
+      if (parent) parent.open = true;
       const btn = [...last.querySelectorAll('button')].pop();
-      btn.focus();
+      const gap = () => bar.getBoundingClientRect().height + 8;
+      const reveal = el => {
+        let r = el.getBoundingClientRect();
+        const limit = innerHeight - gap();
+        if (r.bottom > limit) window.scrollBy(0, r.bottom - limit);
+        r = el.getBoundingClientRect();
+        if (r.top < 4) window.scrollBy(0, r.top - 4);
+      };
+      reveal(last);
+      btn.focus({ preventScroll: true });
       const r = last.getBoundingClientRect();
       const b = bar.getBoundingClientRect();
       const overlap = !(r.bottom <= b.top + 0.5 || r.top >= b.bottom - 0.5 || r.right <= b.left || r.left >= b.right);
       const inView = r.width > 8 && r.height > 8 && r.top >= -1 && r.left >= -1 && r.bottom <= innerHeight + 1 && r.right <= innerWidth + 1;
-      return { inView, clear: !overlap, h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom), bar: Math.round(b.top), focus: document.activeElement === btn, internal: list.scrollHeight > list.clientHeight + 2 };
+      const x = Math.min(innerWidth - 2, Math.max(2, r.left + 24));
+      const y = Math.min(b.top - 2, Math.max(r.top + 4, r.top + 16));
+      const node = document.elementFromPoint(x, y);
+      return { inView, clear: !overlap, hit: !!(node && last.contains(node)), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom), bar: Math.round(b.top), focus: document.activeElement === btn, page: Math.round(window.scrollY), internal: list.scrollHeight > list.clientHeight + 2 };
     })()`);
-    t('last template card clears the Continue bar at ' + w + ' ' + theme + ' (' + JSON.stringify(card) + ')', placeOk(card) && card.focus === true && card.internal === true);
-    if ((w === 390 || w === 1280)) await publish('signedchange-m4-scroll-card-' + w + '-' + theme + '.png');
+    t('last template card clears the Continue bar at ' + w + ' ' + theme + ' (' + JSON.stringify(card) + ')', placeOk(card) && card.focus === true);
+    await publish('signedchange-m4-scroll-card-' + w + '-' + theme + '.png');
     const field = await evalJs(`(() => {
+      document.documentElement.style.scrollBehavior = 'auto';
       const bar = document.querySelector('.stepbar');
       const desc = document.getElementById('desc');
       const lang = document.getElementById('lang');
-      desc.focus();
-      desc.scrollIntoView({ block: 'end', inline: 'nearest' });
+      const gap = () => bar.getBoundingClientRect().height + 8;
+      const reveal = el => {
+        let r = el.getBoundingClientRect();
+        const limit = innerHeight - gap();
+        if (r.bottom > limit) window.scrollBy(0, r.bottom - limit);
+        r = el.getBoundingClientRect();
+        if (r.top < 4) window.scrollBy(0, r.top - 4);
+      };
       const measure = el => {
         const r = el.getBoundingClientRect();
         const b = bar.getBoundingClientRect();
         const overlap = !(r.bottom <= b.top + 0.5 || r.top >= b.bottom - 0.5 || r.right <= b.left || r.left >= b.right);
         const inView = r.width > 8 && r.height > 8 && r.top >= -1 && r.left >= -1 && r.bottom <= innerHeight + 1 && r.right <= innerWidth + 1;
-        return { inView, clear: !overlap, h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom), bar: Math.round(b.top) };
+        const x = Math.min(innerWidth - 2, Math.max(2, r.left + 24));
+        const y = Math.min(b.top - 2, Math.max(r.top + 4, r.bottom - 8));
+        const node = document.elementFromPoint(x, y);
+        return { inView, clear: !overlap, hit: !!(node && (node === el || el.contains(node))), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom), bar: Math.round(b.top) };
       };
-      lang.focus();
-      lang.scrollIntoView({ block: 'end', inline: 'nearest' });
+      reveal(lang);
+      lang.focus({ preventScroll: true });
       return { desc: measure(desc), lang: measure(lang), focus: document.activeElement === lang };
     })()`);
     t('What changed and the last step-1 field clear the Continue bar at ' + w + ' ' + theme + ' (' + JSON.stringify(field) + ')', placeOk(field.desc) && placeOk(field.lang) && field.focus === true);
-    if ((w === 390 || w === 1280)) await publish('signedchange-m4-scroll-field-' + w + '-' + theme + '.png');
+    await publish('signedchange-m4-scroll-field-' + w + '-' + theme + '.png');
   }
 }
+
+const linkCases = await evalJs(`(async () => {
+  sessionStorage.setItem('sc-test-ip', 'link-net');
+  const made = await fetch('/account/new', { method: 'POST' });
+  const acct = await made.json();
+  const c = document.createElement('canvas'); c.width = 140; c.height = 50; c.getContext('2d').fillRect(0, 0, 140, 50);
+  const created = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, template: 'custom', mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Link', clientContact: 'link@example.com', desc: 'Check this link', price: '8', currency: 'USD', date: '2026-11-07', title: 'Link me', lang: 'en' } }) });
+  const j = await created.json();
+  const params = new URLSearchParams((j.signUrl || '').split('#')[1] || '');
+  await fetch('/doc/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ d: params.get('d') }) });
+  const pending = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, template: 'custom', mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Tamper', clientContact: 'tamper@example.com', desc: 'Leave this one waiting', price: '8', currency: 'USD', date: '2026-11-07', title: 'Tamper me', lang: 'en' } }) });
+  const p = await pending.json();
+  sessionStorage.removeItem('sc-test-ip');
+  return { create: created.status, pending: pending.status, url: j.signUrl || '', tamper: (p.signUrl || '').replace(/t=[^&]+/, 't=not-the-real-token-0123456789') };
+})()`);
+await go(linkCases.url);
+await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('review').hidden || !document.getElementById('err').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 5000); })`);
+const cancelledLink = await evalJs(`({ review: !document.getElementById('review').hidden, err: document.getElementById('errm').textContent })`);
+t('a cancelled signing link does not open the form (' + cancelledLink.err + ')', cancelledLink.review === false && /cancel/i.test(cancelledLink.err));
+await go(ORIGIN + '/sign.html?unknown=1#d=notarealdocumentid1234&t=abcdefghijklmnopqrstuvwxyz012345');
+await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('err').hidden || !document.getElementById('review').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 5000); })`);
+const badLink = await evalJs(`({ href: location.href, review: !document.getElementById('review').hidden, err: document.getElementById('errm').textContent })`);
+t('an unknown signing link is not a form (' + badLink.err + ')', badLink.href.includes('unknown=1') && badLink.review === false && /not valid/i.test(badLink.err));
+await go(String(linkCases.tamper).replace('sign.html', 'sign.html?tamper=1'));
+await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('err').hidden || !document.getElementById('review').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 5000); })`);
+const tampered = await evalJs(`({ href: location.href, review: !document.getElementById('review').hidden, err: document.getElementById('errm').textContent })`);
+t('a tampered signing token on a waiting document is not a form (' + tampered.href + ' / ' + tampered.err + ')', tampered.href.includes('tamper=1') && tampered.review === false && /not valid/i.test(tampered.err));
+const liveLink = await evalJs(`(async () => {
+  sessionStorage.setItem('sc-test-ip', 'live-link');
+  const made = await fetch('/account/new', { method: 'POST' });
+  const acct = await made.json();
+  const c = document.createElement('canvas'); c.width = 140; c.height = 50; c.getContext('2d').fillRect(0, 0, 140, 50);
+  const created = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, template: 'custom', mode: 'remote', creatorSig: c.toDataURL('image/png'), fields: { biz: 'Ada', client: 'Live', clientContact: 'live@example.com', desc: 'Still waiting', price: '9', currency: 'USD', date: '2026-11-07', title: 'Still open', lang: 'en' } }) });
+  const j = await created.json();
+  sessionStorage.removeItem('sc-test-ip');
+  return j.signUrl || '';
+})()`);
+await go(liveLink);
+await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('review').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 5000); })`);
+await evalJs(`sessionStorage.setItem('sc-mock','sign-slow'); window.__signCalls = 0; document.getElementById('name').value = 'Live Person'; document.getElementById('typeSig').click(); document.getElementById('agree').checked = true`);
+const doubleSign = await evalJs(`(async () => {
+  const btn = document.getElementById('sign');
+  btn.click();
+  const disabled = btn.disabled;
+  btn.click();
+  await new Promise(r => setTimeout(r, 500));
+  return { calls: window.__signCalls || 0, disabled, done: !document.getElementById('done').hidden, msg: document.getElementById('msg').textContent };
+})()`);
+t('a second sign click does not send a second signature (' + JSON.stringify(doubleSign) + ')', doubleSign.calls === 1 && doubleSign.disabled === true && doubleSign.done === false && /confirm|try/i.test(doubleSign.msg));
+await evalJs(`sessionStorage.setItem('sc-mock','offline')`);
+await evalJs(`document.getElementById('sign').click()`);
+await evalJs(`new Promise(r => setTimeout(r, 300))`);
+const offlineSign = await evalJs(`({ done: !document.getElementById('done').hidden, msg: document.getElementById('msg').textContent })`);
+t('signing while offline is not a success (' + offlineSign.msg + ')', offlineSign.done === false && /Network/i.test(offlineSign.msg));
+await evalJs(`sessionStorage.setItem('sc-mock','sign-403')`);
+await evalJs(`document.getElementById('sign').click()`);
+await evalJs(`new Promise(r => setTimeout(r, 200))`);
+const forbiddenSign = await evalJs(`({ done: !document.getElementById('done').hidden, msg: document.getElementById('msg').textContent })`);
+t('sign 403 does not complete the signature (' + forbiddenSign.msg + ')', forbiddenSign.done === false && /cannot sign/i.test(forbiddenSign.msg));
+await evalJs(`sessionStorage.removeItem('sc-mock')`);
+if (signShot) {
+  await go(signShot.includes('?') ? signShot : signShot.replace('sign.html', 'sign.html?again=sign'));
+  await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('review').hidden || !document.getElementById('done').hidden || !document.getElementById('err').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 5000); })`);
+  const secondSign = await evalJs(`({ review: !document.getElementById('review').hidden, done: !document.getElementById('done').hidden, err: document.getElementById('errm').textContent })`);
+  t('opening a used signing link does not show a fresh signature form (' + secondSign.err + ')', secondSign.review === false && (secondSign.done === true || /signed|finished|valid/i.test(secondSign.err)));
+}
+await evalJs(`sessionStorage.setItem('sc-mock','me-403')`);
+await go(ORIGIN + '/app.html?forbid=1#docs');
+await evalJs(`new Promise(r => setTimeout(r, 500))`);
+const forbid = await evalJs(`document.getElementById('listError').textContent`);
+t('list 403 is not an empty list (injected fetch: ' + forbid + ')', /cannot open/i.test(forbid));
+await evalJs(`sessionStorage.removeItem('sc-mock')`);
+const signedReady = await evalJs(`(async () => {
+  sessionStorage.setItem('sc-test-ip', 'copy-signed-net');
+  const made = await fetch('/account/new', { method: 'POST' });
+  const acct = await made.json();
+  const c = document.createElement('canvas'); c.width = 140; c.height = 50; c.getContext('2d').fillRect(0, 0, 140, 50);
+  const sig = c.toDataURL('image/png');
+  const created = await fetch('/doc/create', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + acct.id + '.' + acct.key }, body: JSON.stringify({ v: 3, template: 'custom', mode: 'inperson', creatorSig: sig, otherSig: sig, fields: { biz: 'Ada', client: 'Bob', clientContact: 'bob@example.com', desc: 'Signed work that must stay unchanged', price: '12', currency: 'USD', date: '2026-11-07', title: 'Finished record', lang: 'en' } }) });
+  const j = await created.json();
+  if (created.ok) localStorage.setItem('sc_acct', JSON.stringify(acct));
+  sessionStorage.removeItem('sc-test-ip');
+  return { status: created.status, doc: j.status || '', error: j.error || j.message || '' };
+})()`);
+t('a finished record exists to copy (' + signedReady.status + ' ' + signedReady.doc + ' ' + signedReady.error + ')', signedReady.status === 200 && signedReady.doc === 'signed');
+await go(ORIGIN + '/app.html?copy=1#docs');
+await evalJs(`new Promise(r => { const i = setInterval(() => { if (document.querySelector('#history .hdoc')) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 5000); })`);
+const copySigned = await evalJs(`(async () => {
+  window.confirm = () => true;
+  const card = [...document.querySelectorAll('#history .hdoc')].find(el => el.dataset.status === 'signed');
+  if (!card) return { toast: 'no-signed', hash: location.hash, status: '', desc: '', edit: true };
+  const labels = [...card.querySelectorAll('button')].map(b => b.textContent);
+  const btn = [...card.querySelectorAll('button')].find(b => b.textContent === 'Duplicate');
+  if (!btn) return { toast: 'no-button', hash: location.hash, status: card.dataset.status, desc: '', edit: labels.includes('Edit'), labels };
+  btn.click();
+  await new Promise(r => setTimeout(r, 250));
+  return { toast: (document.getElementById('sctoast') || {}).textContent || '', hash: location.hash, status: card.dataset.status, desc: document.getElementById('desc').value, edit: labels.includes('Edit') };
+})()`);
+t('copying a signed document opens a new form and leaves the finished record signed (' + JSON.stringify(copySigned) + ')', /finished record is not changed/.test(copySigned.toast) && copySigned.hash === '#create' && copySigned.status === 'signed' && copySigned.desc.trim().length > 0 && copySigned.edit === false);
 
 const externalHosts = blocked.filter(u => !u.includes('paypal.com') && !u.includes('paypalobjects.com'));
 t('no non-payment external host is contacted (' + externalHosts.slice(0, 4).join(' ') + ')', externalHosts.length === 0);
 
 const { spawnSync } = await import('node:child_process');
-const sheets = [
-  ['signedchange-m4-sheet-home.png', ['signedchange-m4-home-light.png', 'signedchange-m4-home-dark.png']],
-  ['signedchange-m4-sheet-blog.png', ['signedchange-m4-blog-light.png', 'signedchange-m4-blog-dark.png']],
-  ['signedchange-m4-sheet-app.png', ['signedchange-m4-app-light.png', 'signedchange-m4-app-dark-sidebar.png']],
-  ['signedchange-m4-sheet-templates.png', ['signedchange-m4-templates-light.png', 'signedchange-m4-templates-dark.png']],
-  ['signedchange-m4-sheet-sign.png', ['signedchange-m4-sign-light.png', 'signedchange-m4-sign-dark.png']],
-  ['signedchange-m4-sheet-mobile.png', ['signedchange-m4-mobile-theme-menu.png', 'signedchange-m4-mobile-lang-menu.png']],
-  ['signedchange-m4-sheet-scroll-mobile-light.png', ['signedchange-m4-scroll-card-390-light.png', 'signedchange-m4-scroll-field-390-light.png']],
-  ['signedchange-m4-sheet-scroll-mobile-dark.png', ['signedchange-m4-scroll-card-390-dark.png', 'signedchange-m4-scroll-field-390-dark.png']],
-  ['signedchange-m4-sheet-scroll-desktop-light.png', ['signedchange-m4-scroll-card-1280-light.png', 'signedchange-m4-scroll-field-1280-light.png']],
-  ['signedchange-m4-sheet-scroll-desktop-dark.png', ['signedchange-m4-scroll-card-1280-dark.png', 'signedchange-m4-scroll-field-1280-dark.png']]
-];
+for (const theme of ['light', 'dark']) {
+  await evalJs(`scSetTheme(${JSON.stringify(theme)})`);
+  for (const w of [360, 390, 768, 1280]) {
+    await setSize(w, 900);
+    await go(ORIGIN + '/app.html?shot=create#create');
+    await evalJs(`new Promise(r => setTimeout(r, 300))`);
+    await publish('signedchange-m5-creator-' + w + '-' + theme + '.png');
+    await go(ORIGIN + '/app.html?shot=docs#docs');
+    await evalJs(`new Promise(r => { const i = setInterval(() => { if (document.querySelector('#history .hdoc') || document.getElementById('listError').textContent) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 4000); })`);
+    await evalJs(`(() => { const find = document.getElementById('docFind'); const sel = document.getElementById('docStatus'); if (sel) { sel.value = 'signed'; sel.dispatchEvent(new Event('change')); } if (find) { find.value = 'Bob'; find.dispatchEvent(new Event('input')); } })()`);
+    await publish('signedchange-m5-docs-' + w + '-' + theme + '.png');
+    if (liveLink) {
+      await evalJs(`sessionStorage.setItem('sc-test-ip', ${JSON.stringify('shot-sign')});`);
+      await go(String(liveLink).replace('sign.html', 'sign.html?shot=sign-' + w + '-' + theme));
+      await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('review').hidden || !document.getElementById('err').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 4000); })`);
+      await publish('signedchange-m5-sign-' + w + '-' + theme + '.png');
+    }
+    if (String(declinedUrl).includes('#d=')) {
+      await evalJs(`sessionStorage.setItem('sc-test-ip', ${JSON.stringify('shot-decline')});`);
+      await go(String(declinedUrl).replace('sign.html', 'sign.html?shot=decline-' + w + '-' + theme));
+      await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('declined').hidden || !document.getElementById('err').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 4000); })`);
+      await publish('signedchange-m5-decline-' + w + '-' + theme + '.png');
+    }
+    await evalJs(`sessionStorage.setItem('sc-test-ip', ${JSON.stringify('shot-error')});`);
+    await go(ORIGIN + '/sign.html?error=1#d=notarealdocumentid1234&t=abcdefghijklmnopqrstuvwxyz012345');
+    await evalJs(`new Promise(r => { const i = setInterval(() => { if (!document.getElementById('err').hidden) { clearInterval(i); r(); } }, 80); setTimeout(() => { clearInterval(i); r(); }, 4000); })`);
+    await publish('signedchange-m5-error-' + w + '-' + theme + '.png');
+  }
+}
+await evalJs(`scSetTheme('light')`);
+const sheets = [];
+for (const w of [360, 390, 768, 1280]) {
+  for (const theme of ['light', 'dark']) {
+    sheets.push(['signedchange-m5-' + w + '-' + theme + '.png', [
+      'signedchange-m5-catalogue-' + w + '-' + theme + '.png',
+      'signedchange-m5-creator-' + w + '-' + theme + '.png',
+      'signedchange-m5-sign-' + w + '-' + theme + '.png',
+      'signedchange-m5-decline-' + w + '-' + theme + '.png',
+      'signedchange-m5-docs-' + w + '-' + theme + '.png',
+      'signedchange-m5-error-' + w + '-' + theme + '.png'
+    ]]);
+  }
+}
 const sheetScript = `
 from PIL import Image, ImageDraw
 import sys
@@ -838,7 +1108,7 @@ writeFileSync(join(art, 'm4-screenshot-manifest.txt'), manifest.join('\n') + '\n
 console.log('SCREENSHOTS ' + manifest.length);
 manifest.forEach(line => console.log(line));
 const homePair = manifest[0];
-t('contact sheets saved and home light/dark raw files differ', manifest.length === 10 && manifest.length <= 11 && createHash('sha256').update(readFileSync(join(shots, 'signedchange-m4-home-light.png'))).digest('hex') !== createHash('sha256').update(readFileSync(join(shots, 'signedchange-m4-home-dark.png'))).digest('hex'));
+t('fresh catalogue, list and signing sheets saved', manifest.length === 8);
 console.log(results.filter(Boolean).length + '/' + results.length + ' passed');
 chrome.kill('SIGKILL');
 server.close();
