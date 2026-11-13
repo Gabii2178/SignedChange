@@ -368,6 +368,14 @@ function coordOut(env, docId, out) {
   if (out.code && SIGN_ERR[out.code]) return json({ ok: false, error: SIGN_ERR[out.code], code: out.code }, st, h);
   return json({ ok: false, error: out.error || 'Document coordination is unavailable. Please try again.', code: out.code }, st, h);
 }
+async function signedSnapshot(state, life) {
+  if (!life || life.status !== 'signed' || !life.finalHash) return null;
+  try {
+    const snap = await state.storage.get('terminalDoc');
+    if (!snap || snap.status !== 'signed' || snap.finalHash !== life.finalHash) return null;
+    return snap;
+  } catch { return null; }
+}
 async function kvGetDoc(state, env, id) {
   const live = await env.PAYMENTS.get('doc:' + id, 'json');
   if (env.SC_TEST_FAULT !== 'stale-get') return live;
@@ -484,7 +492,7 @@ async function writeTerminal(state, env, id, life, doc, body) {
     next = built.doc; next.lifeGen = life.gen;
   }
   if (!next) throw new Error('kv-base');
-  if (next.status === 'signed') await state.storage.put('terminalDoc', next);
+  if (next.status === 'signed') { try { await state.storage.put('terminalDoc', next); } catch { /* the signed body is still written below; a cached read can use it once the cache expires */ } }
   const previous = doc;
   await kvPutDoc(state, env, id, next);
   await armShadow(state, env, previous);
@@ -610,8 +618,8 @@ export async function runLifecycle(state, env, body) {
       });
       if (step.type === 'respond') return step.response;
       if (step.type === 'restore') {
-        await kvPutDoc(state, env, id, step.snap);
-        if (action === 'read' || action === 'peek') return { ok: true, status: 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
+        try { await kvPutDoc(state, env, id, step.snap); } catch { /* the snapshot is still returned to this read */ }
+        if (action === 'read' || action === 'peek') return { ok: true, status: 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status), snapshot: step.snap };
         return settled(step.life, action);
       }
       if (step.type === 'settled') {
@@ -621,7 +629,9 @@ export async function runLifecycle(state, env, body) {
         }
         if (action === 'read' || action === 'peek') {
           if (step.life.status === 'deleted' && observed) { try { await eraseDoc(env, id, step.life.owner, step.life.attCount); } catch { /* read still reports the tombstone */ } }
-          return { ok: step.life.status !== 'deleted', status: step.life.status === 'deleted' ? 404 : 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
+          const out = { ok: step.life.status !== 'deleted', status: step.life.status === 'deleted' ? 404 : 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
+          if (step.life.status === 'signed') { const snapshot = await signedSnapshot(state, step.life); if (snapshot) out.snapshot = snapshot; }
+          return out;
         }
         const same = step.life.opId && step.life.kvGen < step.life.gen;
         if (same) return { ok: false, status: 503, code: 'kv' };
@@ -664,7 +674,11 @@ export async function runLifecycle(state, env, body) {
           if (action === 'sign' && step.life.viewKey) return { ok: true, status: 200, viewKey: step.life.viewKey, finalHash: step.life.finalHash };
           return step.success || { ok: true, status: 200 };
         }
-        if (action === 'read' || action === 'peek') return { ok: step.life.status !== 'deleted', status: step.life.status === 'deleted' ? 404 : 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
+        if (action === 'read' || action === 'peek') {
+          const out = { ok: step.life.status !== 'deleted', status: step.life.status === 'deleted' ? 404 : 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
+          if (step.life.status === 'signed') { const snapshot = await signedSnapshot(state, step.life); if (snapshot) out.snapshot = snapshot; }
+          return out;
+        }
         return settled(step.life, action);
       } catch { return { ok: false, status: 503, code: 'kv', error: 'Document coordination is unavailable. Please try again.' }; }
     }
@@ -785,13 +799,28 @@ async function fingerprintsMatch(env, doc) {
   }
   return true;
 }
-// Ask the Milestone 1 coordinator, then re-read KV. A stale body is not returned as the authority.
+async function readStored(env, id) {
+  if (env.SC_TEST_FAULT === 'cached-get') {
+    const cached = await env.PAYMENTS.get('cache:' + id, 'json');
+    if (cached) return cached;
+  }
+  return env.PAYMENTS.get('doc:' + id, 'json');
+}
+// Ask the lifecycle object first. KV reads can stay on the pre-sign body for about a minute, so a signed lifecycle snapshot is the record until that cache expires. A stored body that is already signed but no longer matches is not replaced.
 async function authoritativeDoc(env, id) {
   const gate = await docCoord(env, id, { action: 'peek' });
   if (gateDown(gate)) return { status: 503, error: 'Document coordination is unavailable. Please try again.' };
   if (gate.terminalStatus === 'deleted') return { status: 404, error: 'No document with this ID. It may have been deleted by its owner.' };
   if (gate.status === 404 && !gate.terminalStatus) return { status: 404, error: 'No document with this ID. It may have been deleted by its owner.' };
-  const doc = await env.PAYMENTS.get('doc:' + id, 'json');
+  const doc = await readStored(env, id);
+  const snap = gate.snapshot && gate.snapshot.status === 'signed' ? gate.snapshot : null;
+  if (doc && doc.status === 'signed') {
+    if (!(await fingerprintsMatch(env, doc))) return { status: 409, error: 'This document failed its integrity check.' };
+    return { doc, lifeStatus: gate.terminalStatus || doc.status };
+  }
+  if (gate.terminalStatus === 'signed' && snap && (!doc || doc.status !== 'signed')) {
+    if (await fingerprintsMatch(env, snap)) return { doc: snap, lifeStatus: 'signed' };
+  }
   if (gate.terminalStatus && doc && doc.status !== gate.terminalStatus && gate.terminalStatus !== 'deleted') {
     return { status: 200, confirming: true, expected: gate.terminalStatus, error: 'The signature was accepted. The stored record is still being confirmed. This page will update when the stored record matches. It is not shown as signed until then.' };
   }
@@ -890,7 +919,11 @@ export async function me(env, acct, h, url) {
     const gate = await docCoord(env, id, { action: 'peek' });
     if (gateDown(gate)) return json({ ok: false, error: 'Document coordination is unavailable. Please try again.' }, 503, h);
     if (gate.terminalStatus === 'deleted' || (gate.status === 404 && !gate.terminalStatus)) continue;
-    const d = await env.PAYMENTS.get('doc:' + id, 'json');
+    const d = await readStored(env, id);
+    if (gate.snapshot && gate.snapshot.status === 'signed' && (!d || d.status !== 'signed') && gate.snapshot.acct === acct.id) {
+      docs.push(listRow(gate.snapshot));
+      continue;
+    }
     if (gate.terminalStatus && d && d.status !== gate.terminalStatus && gate.terminalStatus !== 'deleted') {
       if (d.acct === acct.id) docs.push({ ...listRow(d), status: 'confirming' });
       continue;

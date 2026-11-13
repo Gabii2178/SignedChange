@@ -8,7 +8,7 @@ const t = (n, ok) => { res.push(!!ok); console.log((ok ? 'PASS ' : 'FAIL ') + n)
 const mf = new Miniflare({
   scriptPath: 'dist/worker.js', modules: true, kvNamespaces: ['PAYMENTS'],
   durableObjects: { GIFT_LOCK: 'GiftLock' },
-  bindings: { SITE_ORIGIN: O, RECEIVER_EMAIL: 'termschange@gmail.com', PRICE: '49.00', SUB_PRICE: '9.00', CURRENCY: 'USD', PAYPAL_VERIFY_URL: 'http://127.0.0.1:1/', TOKEN_SECRET: 'confirm' },
+  bindings: { SITE_ORIGIN: O, RECEIVER_EMAIL: 'termschange@gmail.com', PRICE: '49.00', SUB_PRICE: '9.00', CURRENCY: 'USD', PAYPAL_VERIFY_URL: 'http://127.0.0.1:1/', TOKEN_SECRET: 'confirm', SC_TEST_FAULT: 'cached-get' },
 });
 const J = async r => { try { return { status: r.status, body: await r.json() }; } catch { return { status: r.status, body: {} }; } };
 const req = (p, o = {}) => mf.dispatchFetch('http://w' + p, { method: o.method || 'GET', body: o.body, headers: { Origin: O, 'Content-Type': 'application/json', 'CF-Connecting-IP': o.ip || 'confirm', ...(o.headers || {}) } });
@@ -45,6 +45,21 @@ t('a tampered signed body is not repaired into a pass', bad.status === 409);
 await kv.put('doc:' + d, JSON.stringify(pendingAgain));
 const pub = await J(await req('/doc/verify?id=' + d, { ip: 'confirm-v' }));
 t('public verify restores the lagging record and shows signed', pub.status === 200 && pub.body.status === 'signed' && pub.body.finalHash === signed.body.finalHash);
+const built = await J(await req('/doc/create', { method: 'POST', ip: 'confirm-build', headers: { Authorization: 'Bearer ' + owner.id + '.' + owner.key }, body: JSON.stringify({ v: 3, template: 'construction', mode: 'remote', creatorSig: png, fields: { ...fields, title: 'Wall', job: 'Site', desc: 'Add a wall' } }) }));
+const bu = new URL(String(built.body.signUrl).replace('#', '?'));
+const bd = bu.searchParams.get('d');
+const bt = bu.searchParams.get('t');
+const bsigned = await J(await req('/doc/sign', { method: 'POST', ip: 'confirm-bs', body: JSON.stringify({ d: bd, t: bt, sig: png, name: 'Bob', agree: true, hash: built.body.hash }) }));
+const cachedPending = JSON.parse(await kv.get('doc:' + bd));
+cachedPending.status = 'pending';
+delete cachedPending.finalHash; delete cachedPending.otherSig; delete cachedPending.otherSigHash; delete cachedPending.viewHash; delete cachedPending.signedAt;
+await kv.put('cache:' + bd, JSON.stringify(cachedPending));
+const cachedStatus = await J(await req('/doc/status?d=' + bd + '&v=' + bsigned.body.viewKey, { ip: 'confirm-cache' }));
+const cachedOwner = await J(await req('/doc/status?d=' + bd, { ip: 'confirm-cache-owner', headers: { Authorization: 'Bearer ' + owner.id + '.' + owner.key } }));
+const cachedVerify = await J(await req('/doc/verify?id=' + bd, { ip: 'confirm-cache-v' }));
+const cachedPdf = await req('/doc/pdf?d=' + bd + '&v=' + bsigned.body.viewKey, { ip: 'confirm-cache-pdf' });
+const stillCached = JSON.parse(await kv.get('cache:' + bd));
+t('a cached pending read still returns the signed lifecycle copy', bsigned.status === 200 && cachedStatus.status === 200 && cachedStatus.body.status === 'signed' && cachedOwner.body.status === 'signed' && cachedVerify.body.status === 'signed' && cachedVerify.body.finalHash === bsigned.body.finalHash && cachedPdf.status === 200 && stillCached.status === 'pending');
 console.log('measured consistent sign-to-status ms', elapsed);
 console.log(res.filter(Boolean).length + '/' + res.length);
 if (res.some(ok => !ok)) process.exit(1);
