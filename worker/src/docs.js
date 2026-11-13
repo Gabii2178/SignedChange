@@ -484,6 +484,7 @@ async function writeTerminal(state, env, id, life, doc, body) {
     next = built.doc; next.lifeGen = life.gen;
   }
   if (!next) throw new Error('kv-base');
+  if (next.status === 'signed') await state.storage.put('terminalDoc', next);
   const previous = doc;
   await kvPutDoc(state, env, id, next);
   await armShadow(state, env, previous);
@@ -536,6 +537,10 @@ export async function runLifecycle(state, env, body) {
           return { type: 'respond', response: { ok: true, status: 200, version: observed.version || 1, hash: observed.hash, history: versions.map(v => ({ n: v.n, parent: v.parent, by: v.by, at: v.at, action: v.action, hash: v.hash, template: v.template, fields: v.fields })) } };
         }
         if (life.terminal && life.kvGen < life.gen) return { type: 'repair', life };
+        if (life.terminal && life.status === 'signed' && life.kvGen === life.gen && (!observed || observed.status !== 'signed')) {
+          const snap = await txn.get('terminalDoc');
+          if (snap && snap.status === 'signed' && snap.finalHash && snap.finalHash === life.finalHash) return { type: 'restore', life, snap };
+        }
         if (life.terminal && observed && !kvMatches(observed, life) && life.status !== 'signed') return { type: 'repair', life };
         if (life.terminal) return { type: 'settled', life };
         if (action === 'invite') {
@@ -604,6 +609,11 @@ export async function runLifecycle(state, env, body) {
         return { type: 'respond', response: { ok: false, status: 400, error: 'Bad request.' } };
       });
       if (step.type === 'respond') return step.response;
+      if (step.type === 'restore') {
+        await kvPutDoc(state, env, id, step.snap);
+        if (action === 'read' || action === 'peek') return { ok: true, status: 200, proceed: false, terminalStatus: step.life.status, code: lifeCode(step.life.status) };
+        return settled(step.life, action);
+      }
       if (step.type === 'settled') {
         if (action === 'invite') {
           const ok = !!(step.life.inviteHash && step.life.inviteHash === body.invite);
@@ -809,14 +819,17 @@ export async function pdfResponse(req, url, env, h) {
 export async function docStatus(req, url, env, h) {
   const d = url.searchParams.get('d'); if (!ID.test(d || '')) return json({ ok: false, error: 'Not found.' }, 404, h);
   const hinted = await env.PAYMENTS.get('doc:' + d, 'json');
-  if (hinted && !(await canReadDoc(req, url, env, hinted))) return json({ ok: false, error: 'Not found.' }, 404, h);
-  if (!hinted) {
+  const viewShaped = /^[\w-]{30,40}$/.test(url.searchParams.get('v') || '');
+  const hintedOk = !!(hinted && await canReadDoc(req, url, env, hinted));
+  if (!hintedOk && !viewShaped) {
     const acct = await auth(req, env);
-    const v = url.searchParams.get('v');
-    if (!acct && !(v && /^[\w-]{30,40}$/.test(v))) return json({ ok: false, error: 'Not found.' }, 404, h);
+    if (!acct) return json({ ok: false, error: 'Not found.' }, 404, h);
   }
   const view = await authoritativeDoc(env, d);
-  if (view.confirming) return json({ ok: true, status: 'confirming', message: view.error }, 200, h);
+  if (view.confirming) {
+    if (!hintedOk) return json({ ok: false, error: 'Not found.' }, 404, h);
+    return json({ ok: true, status: 'confirming', message: view.error }, 200, h);
+  }
   if (!view.doc) return json({ ok: false, error: view.status === 404 ? 'Not found.' : view.error }, view.status, h);
   if (!(await canReadDoc(req, url, env, view.doc))) return json({ ok: false, error: 'Not found.' }, 404, h);
   const doc = view.doc;
