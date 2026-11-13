@@ -4,12 +4,13 @@ function toast(t){let e=document.getElementById('sctoast');if(!e){e=document.cre
 const P=new URLSearchParams(location.hash.slice(1)),d=P.get('d'),t=P.get('t'),v=P.get('v');
 const TZ=(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){return''}})();
 const show=id=>['loading','review','done','err','declined'].forEach(x=>$(x).hidden=x!==id);
+const L=en=>{const m=window.SC_EXACT&&window.SC_EXACT.fr;return window.scLang&&scLang()==='fr'&&m&&m[en]?m[en]:en};
 const err=m=>{$('errm').textContent=m;show('err')};
 async function dl(view){const r=await fetch(API+'/doc/pdf?d='+encodeURIComponent(d)+'&v='+encodeURIComponent(view));if(!r.ok){toast(r.status===409?"This copy doesn’t match the stored record.":r.status===503?"We can’t confirm this document right now.":r.status===404?'That PDF is not available.':'Could not download the PDF. Please try again.');return}
  const b=await r.blob(),m=/filename="([^"]+)"/.exec(r.headers.get('Content-Disposition')||''),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=m?m[1]:'signedchange.pdf';document.body.appendChild(a);a.click();setTimeout(()=>a.remove(),2000)}
 function done(view){show('done');$('dl').onclick=()=>dl(view);try{localStorage.setItem('sc_signed_'+d,view)}catch(e){}history.replaceState(null,'','#d='+d+'&v='+view)}
 if(!d){err(window.scT?scT('sign.incomplete'):'This link is incomplete. Ask the sender to send it again.');return}
-if(v){fetch(API+'/doc/status?d='+encodeURIComponent(d)+'&v='+encodeURIComponent(v)).then(r=>r.json()).then(j=>{if(j.ok&&j.status==='signed')done(v);else err('Document not found.')}).catch(()=>err('Network error.'));return}
+if(v){fetch(API+'/doc/status?d='+encodeURIComponent(d)+'&v='+encodeURIComponent(v)).then(r=>r.json()).then(j=>{if(j.ok&&j.status==='signed')done(v);else if(j.ok&&j.status==='confirming'){err(window.scT?scT('poll.confirm'):(j.message||'The signature was accepted. The stored record is still being confirmed.'));$('retryGet').hidden=false}else err(window.scT?scT('sign.notfound'):'Document not found.')}).catch(()=>err(window.scT?scT('sign.network'):'Network error.'));return}
 let doc=null;const PT={completion:'On completion of this change',net7:'Net 7 (within 7 days)',net14:'Net 14 (within 14 days)',net30:'Net 30 (within 30 days)'};
 const money=(x,c,s)=>(s&&x>0?'+':x<0?'−':'')+(c?c+' ':'')+Math.abs(x).toFixed(2);
 function load(){fetch(API+'/doc/get?d='+encodeURIComponent(d)+'&t='+encodeURIComponent(t||'')).then(async r=>{const j=await r.json().catch(()=>({}));j._s=r.status;return j}).then(j=>{
@@ -21,7 +22,7 @@ function load(){fetch(API+'/doc/get?d='+encodeURIComponent(d)+'&t='+encodeURICom
   return err(j.error||'This link is not valid.')}
  doc=j;const f=j.fields,c=f.currency;$('dt').textContent=f.title;
  const who=(n,co,r,ct)=>n+(r?', '+r:'')+(co?' – '+co:'')+(ct?' · '+ct:'');
- const rows=[['Date',f.date],['From',who(f.biz,f.bizCo,f.bizRole,f.contact)],['To',who(f.client,f.clientCo,f.clientRole,f.clientContact)],['Job / contract',(f.job||'-')+(f.contractDate?' (agreement dated '+f.contractDate+')':'')],['Agreed change',f.desc]];
+ const rows=[[L('Date'),f.date],[L('From'),who(f.biz,f.bizCo,f.bizRole,f.contact)],[L('To'),who(f.client,f.clientCo,f.clientRole,f.clientContact)],[L('Job / contract'),(f.job||'-')+(f.contractDate?' ('+L('agreement dated')+' '+f.contractDate+')':'')],[L('Agreed change'),f.desc]];
  if(j.v===3){$('cono').textContent='Change order #'+j.coNo;
   if(f.lines&&f.lines.length)rows.push(['Price breakdown',f.lines.map(l=>l.d+': '+money(parseFloat(l.a.replace(',','.')),c)).join('\n')]);
   if(f.newDate||+f.daysAdded)rows.push(['Schedule',(f.newDate?'New completion date: '+f.newDate+'\n':'')+'Days added: '+(+f.daysAdded||0)]);

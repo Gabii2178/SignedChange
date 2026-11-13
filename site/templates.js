@@ -13,14 +13,20 @@
   ];
   const $ = id => document.getElementById(id);
   function tpl(key) { return (window.SC_TPL && window.SC_TPL[key]) || null; }
-  function titleFor(key) {
+  function shown(key) {
     const t = tpl(key);
+    if (!t) return null;
+    if (window.scLang && scLang() === 'fr' && window.SC_TPL_FR && SC_TPL_FR[key]) return Object.assign({}, t, SC_TPL_FR[key]);
+    return t;
+  }
+  function titleFor(key) {
+    const t = shown(key);
     if (!t) return key;
-    return t.blank ? 'Blank (write your own)' : (t.title || key);
+    return t.blank ? (window.scT ? scT('tpl.custom') : 'Blank (write your own)') : (t.title || key);
   }
   function showPreview(key) {
     const box = $('tplPreview');
-    const t = tpl(key);
+    const t = shown(key);
     if (!box || !t) return;
     box.hidden = false;
     box.textContent = '';
@@ -49,7 +55,7 @@
     if (title) title.scrollIntoView({ block: 'center' });
   }
   function row(key, name) {
-    const t = tpl(key);
+    const t = shown(key);
     if (!t) return null;
     const card = document.createElement('article');
     card.className = 'tpl-row' + (t.blank ? ' tpl-blank' : '');
@@ -96,19 +102,19 @@
     const q = ($('tplSearch') && $('tplSearch').value || '').trim().toLowerCase();
     const chosen = cat.value || 'all';
     list.textContent = '';
-    let shown = 0;
+    let shownCount = 0;
     const blank = tpl('custom');
     if (blank && chosen === 'all') {
       const blob = ('blank ' + titleFor('custom') + ' ' + (blank.use || '')).toLowerCase();
       if (!q || blob.includes(q)) {
         const card = row('custom', 'Blank');
-        if (card) { list.appendChild(card); shown += 1; }
+        if (card) { list.appendChild(card); shownCount += 1; }
       }
     }
     CATS.forEach(([id, name, keys]) => {
       if (chosen !== 'all' && chosen !== id) return;
       const matches = keys.filter(key => {
-        const t = tpl(key);
+        const t = shown(key);
         if (!t) return false;
         const blob = (name + ' ' + titleFor(key) + ' ' + (t.use || '') + ' ' + (t.desc || '') + ' ' + (t.job || '')).toLowerCase();
         return !q || blob.includes(q);
@@ -129,11 +135,11 @@
         const card = row(key, name);
         if (!card) return;
         sec.appendChild(card);
-        shown += 1;
+        shownCount += 1;
       });
       list.appendChild(sec);
     });
-    if (!shown) {
+    if (!shownCount) {
       const empty = document.createElement('p');
       empty.id = 'tplEmpty';
       empty.textContent = window.scT ? scT('tpl.none') : 'No starting points match that search.';

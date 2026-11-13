@@ -78,13 +78,21 @@
       if (el.querySelector('input, select, textarea, button') && el.tagName !== 'OPTION') return;
       el.textContent = scT(el.getAttribute('data-i18n'));
     });
-    document.querySelectorAll('.translated-article, .source-note').forEach(function (el) { el.remove(); });
+    document.querySelectorAll('.source-note, .translated-article').forEach(function (el) { el.remove(); });
     document.querySelectorAll('[data-i18n-html]').forEach(function (el) {
       if (el.closest('.english-original') || el.classList.contains('translated-article')) return;
-      el.innerHTML = scT(el.getAttribute('data-i18n-html'));
+      if (!el.dataset.enHtml) el.dataset.enHtml = el.innerHTML;
+      var fr = lang === 'fr' ? lookup('fr', el.getAttribute('data-i18n-html')) : null;
+      el.innerHTML = fr || el.dataset.enHtml;
     });
     document.querySelectorAll('[data-i18n-placeholder]').forEach(function (el) {
       el.placeholder = scT(el.getAttribute('data-i18n-placeholder'));
+    });
+    document.querySelectorAll('[data-i18n-title]').forEach(function (el) {
+      document.title = scT(el.getAttribute('data-i18n-title'));
+    });
+    document.querySelectorAll('meta[data-i18n-content]').forEach(function (el) {
+      el.setAttribute('content', scT(el.getAttribute('data-i18n-content')));
     });
     var menu = document.getElementById('burger');
     if (menu && menu.getAttribute('data-i18n')) menu.textContent = scT('nav.menu');
@@ -96,6 +104,7 @@
         if (summary) summary.hidden = true;
       }
     });
+    paintExact(lang);
     listeners.forEach(function (fn) { try { fn(lang); } catch (e) {} });
   }
   function scSetLang(lang) {
@@ -114,6 +123,39 @@
       gaps[code] = Object.keys(en).filter(function (k) { return !all[code] || !all[code][k]; });
     });
     return gaps;
+  }
+  function paintExact(lang) {
+    var map = (window.SC_EXACT && window.SC_EXACT.fr) || {};
+    var root = document.body;
+    if (!root) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var n;
+    while ((n = walker.nextNode())) {
+      var p = n.parentElement;
+      if (!p || p.closest('script, style, .sheet, #reviewSheet, #rows, #history, #detailBody, #tplPreview, [data-i18n], [data-i18n-html], [data-lang], .lang-btn')) continue;
+      if (n._scEn == null) n._scEn = n.nodeValue;
+      var raw = n._scEn;
+      var trimmed = raw.replace(/\s+/g, ' ').trim();
+      if (lang === 'fr' && map[trimmed]) {
+        var lead = raw.match(/^\s*/)[0];
+        var tail = raw.match(/\s*$/)[0];
+        n.nodeValue = lead + map[trimmed] + (tail === lead ? '' : tail);
+      } else n.nodeValue = raw;
+    }
+    document.querySelectorAll('[data-sc-alt]').forEach(function (el) {
+      if (!el.dataset.enAlt) el.dataset.enAlt = el.getAttribute('alt') || '';
+      el.setAttribute('alt', lang === 'fr' && map[el.dataset.enAlt] ? map[el.dataset.enAlt] : el.dataset.enAlt);
+    });
+    if (document.title) {
+      if (!document.documentElement.dataset.enTitle) document.documentElement.dataset.enTitle = document.title;
+      var title = document.documentElement.dataset.enTitle;
+      document.title = lang === 'fr' && map[title] ? map[title] : title;
+    }
+    var desc = document.querySelector('meta[name="description"]');
+    if (desc) {
+      if (!desc.dataset.enContent) desc.dataset.enContent = desc.getAttribute('content') || '';
+      desc.setAttribute('content', lang === 'fr' && map[desc.dataset.enContent] ? map[desc.dataset.enContent] : desc.dataset.enContent);
+    }
   }
   function scUnkeyed(root) {
     var lang = current();

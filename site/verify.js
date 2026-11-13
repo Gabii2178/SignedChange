@@ -3,8 +3,9 @@
 const ST={signed:'Signed',pending:'Waiting for signature',declined:'Declined',cancelled:'Cancelled'};
 const ut=s=>s?s.replace('T',' ').slice(0,16)+' UTC':'';
 async function go(id){$('vmsg').textContent='';$('vres').hidden=true;if(!/^[\w-]{16,40}$/.test(id)){$('vmsg').textContent='That does not look like a document ID.';return}
- try{const r=await fetch(API+'/doc/verify?id='+encodeURIComponent(id)),j=await r.json();if(!r.ok){$('vres').hidden=true;const t=k=>window.scT?scT(k):k;$('vmsg').textContent=r.status===400?t('verify.bad'):r.status===404?t('verify.missing'):r.status===409?t('verify.mismatch'):r.status===503?t('verify.down'):(j.error||'Not found.');return}
-  $('vstat').textContent=ST[j.status]||j.status;const R=$('vrows');R.textContent='';
+ try{const r=await fetch(API+'/doc/verify?id='+encodeURIComponent(id)),j=await r.json();if(j.ok&&j.status==='confirming'){$('vres').hidden=true;$('vmsg').textContent=window.scT?scT('poll.confirm'):(j.message||'The signature was accepted. The stored record is still being confirmed.');return}if(!r.ok){$('vres').hidden=true;const t=k=>window.scT?scT(k):k;$('vmsg').textContent=r.status===400?t('verify.bad'):r.status===404?t('verify.missing'):r.status===409?t('verify.mismatch'):r.status===503?t('verify.down'):(j.error||'Not found.');return}
+  const labels=window.scLang&&scLang()==='fr'?{signed:'Signé',pending:"En attente de signature",declined:'Refusé',cancelled:'Annulé',confirming:'Confirmation en cours'}:ST;
+  $('vstat').textContent=labels[j.status]||j.status;const R=$('vrows');R.textContent='';
   const p=o=>o.name+(o.role?', '+o.role:'')+(o.company?' – '+o.company:'');
   const rows=[['Document',j.title+(j.coNo?' (change order #'+j.coNo+')':'')],['Document ID',j.id],['Date of change',j.date],j.contractDate&&['Original agreement dated',j.contractDate],['Created by',p(j.creator)],['Other party',p(j.other)],
    ['Created',ut(j.created)],j.signedAt&&['Signed by other party',ut(j.signedAt)+(j.mode==='inperson'?' (in person)':' (remote link)')],j.declinedAt&&['Declined',ut(j.declinedAt)],

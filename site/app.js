@@ -68,7 +68,8 @@ function setF(o){Object.entries(o).forEach(([k,v])=>{if($(k)&&v!=null)$(k).value
 function exampleFor(key){const lang=($('lang')&&$('lang').value)||'en';const all=window.SC_EXAMPLES||{};const pack=all[lang]||all.en||{};return pack[key]||null}
 let appliedTpl=ts.value||'custom';
 function formDirty(){return ['title','job','desc','price','origAmount','payCustom'].some(id=>{const el=$(id);if(!el)return false;const v=String(el.value||'').trim();if(!v)return false;if(id==='price'&&(v==='0'||v==='0.00'))return false;if(id==='title'&&v==='Signed Change Record')return false;return true})}
-ts.addEventListener('change',()=>{const v=ts.value,t=v.startsWith('u:')?userTpls()[v.slice(2)]:TPL[v];if(!t){ts.value=appliedTpl;return}
+function starterFor(v){const base=v.startsWith('u:')?userTpls()[v.slice(2)]:TPL[v];if(!base||v.startsWith('u:')||base.blank)return base;if($('lang')&&$('lang').value==='fr'&&window.SC_TPL_FR&&SC_TPL_FR[v])return Object.assign({},base,SC_TPL_FR[v]);return base}
+ts.addEventListener('change',()=>{const v=ts.value,t=starterFor(v);if(!t){ts.value=appliedTpl;return}
  if(formDirty()&&!confirm('Replace what you wrote with this starting point? Your current text will be replaced.')){ts.value=appliedTpl;const box=document.getElementById('catalog');if(box)box.open=true;return}
  const cleared={priceDir:'inc',payTerms:'',price:'',origAmount:'',payCustom:'',title:'',job:'',desc:'',lines:[]};
  if(v==='custom'||t.blank)setF(cleared);else setF({...cleared,...t,lines:t.lines||[]});appliedTpl=v;hilite()});
@@ -76,6 +77,7 @@ $('saveTpl').addEventListener('click',()=>{const n=(prompt('Name for this templa
  u[n]={title:f.title,job:f.job,desc:f.desc,priceDir:f.priceDir,payTerms:f.payTerms,payCustom:f.payCustom,payMethod:f.payMethod,taxRate:f.taxRate,currency:f.currency,lines:f.lines,lang:f.lang};
  localStorage.setItem(UK,JSON.stringify(u));fillTpls();ts.value='u:'+n;toast('Template saved on this device.')});
 ['biz','bizCo','bizRole','contact','currency','lang'].forEach(k=>{const v=localStorage.getItem('co_'+k);if(v)$(k).value=v;$(k).addEventListener('input',()=>localStorage.setItem('co_'+k,$(k).value))});
+$('lang').addEventListener('change',()=>{const v=ts.value;if(!v||v.startsWith('u:')||!TPL[v]||TPL[v].blank)return;const en=TPL[v],fr=window.SC_TPL_FR&&SC_TPL_FR[v];const desc=$('desc').value,title=$('title').value;const still=(desc===(en.desc||'')&&title===(en.title||''))||(fr&&desc===fr.desc&&title===fr.title)||(!desc&&!title);if(!still)return;const t=starterFor(v);if(!t)return;setF({priceDir:t.priceDir||'inc',payTerms:t.payTerms||'',price:'',origAmount:'',payCustom:t.payCustom||'',title:t.title||'',job:t.job||'',desc:t.desc||'',lines:[]});});
 $('date').valueAsDate=new Date();
 // ---- price lines + live totals ----
 function addLine(d,a){const r=document.createElement('div');r.className='pline';const di=document.createElement('input'),ai=document.createElement('input'),x=document.createElement('button');
@@ -213,8 +215,8 @@ async function dl(id){const r=await fetch(API+'/doc/pdf?d='+encodeURIComponent(i
  const bl=await r.blob(),cd=r.headers.get('Content-Disposition')||'',m=/filename="([^"]+)"/.exec(cd),a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download=m?m[1]:'signedchange.pdf';document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},2000)}
 let poll=0;
 function watch(id){clearInterval(poll);let k=0;$('live').className='live';$('live').textContent=window.scT?scT('poll.wait'):'Waiting for them to sign. This page updates by itself.';
- const tick=async()=>{if($('share').hidden)return;const j=await api('/doc/status?d='+encodeURIComponent(id));if(j._s===503){$('live').textContent=window.scT?scT('poll.down'):'Cannot confirm yet.';return}if(!j.ok)return;
-  if(j.status==='signed'){clearInterval(poll);$('live').className='live ok';$('live').textContent='✅ Signed! '+j.client+' signed just now. Download the final PDF in My documents below.';toast('✅ Signed! '+j.client+' signed your document.',9000);if(window.scTrack)scTrack('doc_signed_remote');refresh()}
+ const tick=async()=>{if($('share').hidden)return;const j=await api('/doc/status?d='+encodeURIComponent(id));if(j.status==='confirming'){$('live').textContent=window.scT?scT('poll.confirm'):(j.message||'The signature was accepted. The stored record is still being confirmed.');return}if(j._s===503){$('live').textContent=window.scT?scT('poll.down'):'Cannot confirm yet.';return}if(!j.ok)return;
+  if(j.status==='signed'){clearInterval(poll);$('live').className='live ok';$('live').textContent=(window.scT?scT('poll.signed',{name:j.client}):('Signed. '+j.client+' signed just now.'));toast(window.scT?scT('poll.signedToast',{name:j.client}):('Signed. '+j.client+' signed your document.'),9000);if(window.scTrack)scTrack('doc_signed_remote');refresh()}
   else if(j.status==='declined'){clearInterval(poll);$('live').className='live no';$('live').textContent='✋ '+j.client+' asked for changes: “'+(j.declineReason||'')+'”. Use "Revise & resend" in My documents.';toast('✋ '+j.client+' asked for changes.',9000);refresh()}
   else if(j.status==='cancelled')clearInterval(poll)};
  tick();

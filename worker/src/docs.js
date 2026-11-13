@@ -535,8 +535,8 @@ export async function runLifecycle(state, env, body) {
           const versions = (await txn.get('versions')) || [{ n: observed.version || 1, parent: null, docId: id, by: 'owner', at: observed.created, action: 'create', hash: observed.hash, template: observed.template || 'custom', fields: observed.fields }];
           return { type: 'respond', response: { ok: true, status: 200, version: observed.version || 1, hash: observed.hash, history: versions.map(v => ({ n: v.n, parent: v.parent, by: v.by, at: v.at, action: v.action, hash: v.hash, template: v.template, fields: v.fields })) } };
         }
-        if (life.terminal && !kvMatches(observed, life)) return { type: 'repair', life };
         if (life.terminal && life.kvGen < life.gen) return { type: 'repair', life };
+        if (life.terminal && observed && !kvMatches(observed, life) && life.status !== 'signed') return { type: 'repair', life };
         if (life.terminal) return { type: 'settled', life };
         if (action === 'invite') {
           const ok = !!(observed && observed.signHash && observed.signHash === body.invite);
@@ -782,6 +782,9 @@ async function authoritativeDoc(env, id) {
   if (gate.terminalStatus === 'deleted') return { status: 404, error: 'No document with this ID. It may have been deleted by its owner.' };
   if (gate.status === 404 && !gate.terminalStatus) return { status: 404, error: 'No document with this ID. It may have been deleted by its owner.' };
   const doc = await env.PAYMENTS.get('doc:' + id, 'json');
+  if (gate.terminalStatus && doc && doc.status !== gate.terminalStatus && gate.terminalStatus !== 'deleted') {
+    return { status: 200, confirming: true, expected: gate.terminalStatus, error: 'The signature was accepted. The stored record is still being confirmed. This page will update when the stored record matches. It is not shown as signed until then.' };
+  }
   if (gate.terminalStatus && (!doc || doc.status !== gate.terminalStatus)) return { status: 503, error: 'Document coordination is unavailable. Please try again.' };
   if (!doc) return { status: 404, error: 'No document with this ID. It may have been deleted by its owner.' };
   if (!(await fingerprintsMatch(env, doc))) return { status: 409, error: 'This document failed its integrity check.' };
@@ -795,6 +798,7 @@ export async function docAccess(req, url, env) {
 export async function pdfResponse(req, url, env, h) {
   const d = url.searchParams.get('d'); if (!ID.test(d || '')) return json({ ok: false, error: 'Not found.' }, 404, h);
   const view = await authoritativeDoc(env, d);
+  if (view.confirming) return json({ ok: false, code: 'confirming', error: view.error }, 409, h);
   if (!view.doc) return json({ ok: false, error: view.status === 409 ? view.error : view.status === 503 ? view.error : 'Not found.' }, view.status === 409 || view.status === 503 ? view.status : 404, h);
   if (!(await canReadDoc(req, url, env, view.doc))) return json({ ok: false, error: 'Not found.' }, 404, h);
   const doc = view.doc;
@@ -812,6 +816,7 @@ export async function docStatus(req, url, env, h) {
     if (!acct && !(v && /^[\w-]{30,40}$/.test(v))) return json({ ok: false, error: 'Not found.' }, 404, h);
   }
   const view = await authoritativeDoc(env, d);
+  if (view.confirming) return json({ ok: true, status: 'confirming', message: view.error }, 200, h);
   if (!view.doc) return json({ ok: false, error: view.status === 404 ? 'Not found.' : view.error }, view.status, h);
   if (!(await canReadDoc(req, url, env, view.doc))) return json({ ok: false, error: 'Not found.' }, 404, h);
   const doc = view.doc;
@@ -821,6 +826,7 @@ export async function docStatus(req, url, env, h) {
 export async function verifyDoc(url, env, h) {
   const id = url.searchParams.get('id'); if (!ID.test(id || '')) return json({ ok: false, error: 'Not a valid document ID.' }, 400, h);
   const view = await authoritativeDoc(env, id);
+  if (view.confirming) return json({ ok: true, id, status: 'confirming', message: view.error }, 200, h);
   if (!view.doc) return json({ ok: false, error: view.error }, view.status, h);
   const doc = view.doc, f = doc.fields;
   return json({ ok: true, id, status: view.lifeStatus, title: f.title, coNo: doc.coNo || null, date: f.date, contractDate: f.contractDate || null, created: doc.created, signedAt: doc.signedAt || null, declinedAt: doc.declinedAt || null,
@@ -872,6 +878,10 @@ export async function me(env, acct, h, url) {
     if (gateDown(gate)) return json({ ok: false, error: 'Document coordination is unavailable. Please try again.' }, 503, h);
     if (gate.terminalStatus === 'deleted' || (gate.status === 404 && !gate.terminalStatus)) continue;
     const d = await env.PAYMENTS.get('doc:' + id, 'json');
+    if (gate.terminalStatus && d && d.status !== gate.terminalStatus && gate.terminalStatus !== 'deleted') {
+      if (d.acct === acct.id) docs.push({ ...listRow(d), status: 'confirming' });
+      continue;
+    }
     if (gate.terminalStatus && (!d || d.status !== gate.terminalStatus)) return json({ ok: false, error: 'Document coordination is unavailable. Please try again.' }, 503, h);
     if (!d || d.acct !== acct.id) continue;
     docs.push(listRow(d));
