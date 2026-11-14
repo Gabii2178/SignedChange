@@ -93,13 +93,14 @@
     const dl = document.createElement('dl');
     dl.className = 'rows';
     const row = (a, b) => { const dt = document.createElement('dt'); dt.textContent = a; const dd = document.createElement('dd'); dd.textContent = b || '—'; dl.append(dt, dd); };
-    row('From', [val('biz'), val('bizRole'), val('bizCo')].filter(Boolean).join(', '));
-    row('To', [val('client'), val('clientRole'), val('clientCo')].filter(Boolean).join(', '));
-    row('Change', val('desc'));
-    row('Money preview', $('totals') ? $('totals').textContent : '');
-    row('Schedule', [val('newDate') && ('New date ' + val('newDate')), 'Days added ' + (val('daysAdded') || '0')].filter(Boolean).join('. '));
-    row('Payment', val('payTerms') === 'custom' ? val('payCustom') : (val('payTerms') || 'Not specified'));
-    row('Agreement', $('agreePrev') ? $('agreePrev').textContent : '');
+    const label = (key, fallback, vars) => window.scT ? scT(key, vars) : fallback;
+    row(label('review.from', 'From'), [val('biz'), val('bizRole'), val('bizCo')].filter(Boolean).join(', '));
+    row(label('review.to', 'To'), [val('client'), val('clientRole'), val('clientCo')].filter(Boolean).join(', '));
+    row(label('review.change', 'Change'), val('desc'));
+    row(label('review.money', 'Money preview'), $('totals') ? $('totals').textContent : '');
+    row(label('review.schedule', 'Schedule'), [val('newDate') && label('review.newDate', 'New date ' + val('newDate'), { date: val('newDate') }), label('review.days', 'Days added ' + (val('daysAdded') || '0'), { n: val('daysAdded') || '0' })].filter(Boolean).join('. '));
+    row(label('review.payment', 'Payment'), val('payTerms') === 'custom' ? val('payCustom') : (val('payTerms') || label('review.notSpecified', 'Not specified')));
+    row(label('review.agreement', 'Agreement'), $('agreePrev') ? $('agreePrev').textContent : '');
     sheet.appendChild(dl);
   }
   $('formbox').addEventListener('keydown', e => {
@@ -116,6 +117,12 @@
       $('creatorAgree').focus();
     }
   }, true);
+  function closeDetail() {
+    const box = $('detail');
+    if (!box) return;
+    box.hidden = true;
+    if ($('history')) $('history').hidden = false;
+  }
   function showView() {
     const h = location.hash;
     const docs = $('view-docs'), create = $('view-create'), account = $('view-account');
@@ -123,12 +130,24 @@
     docs.hidden = mode !== 'docs';
     create.hidden = mode !== 'create';
     account.hidden = mode !== 'account';
+    if (mode === 'docs') closeDetail();
     const cur = mode === 'account' ? 'nav-account' : 'nav-docs';
     ['nav-docs', 'nav-account'].forEach(id => { const a = $(id); if (!a) return; if (id === cur) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
     if (h === '#buy' && $('buy')) $('buy').scrollIntoView();
     if (mode === 'create') window.dispatchEvent(new Event('sc-step'));
   }
   window.addEventListener('hashchange', showView);
+  const docsNav = $('nav-docs');
+  if (docsNav) docsNav.addEventListener('click', () => {
+    if (location.hash === '#docs' || location.hash === '' || location.hash === '#') closeDetail();
+  });
+  const crumb = document.querySelector('#detail a[href="#docs"]');
+  if (crumb) crumb.addEventListener('click', event => {
+    if (location.hash === '#docs' || location.hash === '' || location.hash === '#') {
+      event.preventDefault();
+      closeDetail();
+    }
+  });
   if ($('akey')) $('akey').type = 'password';
   if ($('revealkey')) $('revealkey').addEventListener('click', () => {
     if (!confirm('Anyone who can see this screen will be able to read your account key. Reveal it?')) return;

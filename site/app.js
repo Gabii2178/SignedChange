@@ -134,7 +134,8 @@ function pad(id,clr,typeBtn,nameFn){const c=$(id),x=c.getContext('2d');let d=fal
 const me=pad('sigMe','clearMe','typeMe',()=>$('biz').value.trim()),other=pad('sigOther','clearOther','typeOther',()=>$('client').value.trim());
 window.addEventListener('sc-step',()=>{me.sz();if(!$('otherBox').hidden)other.sz()});
 const modeSel=()=>document.querySelector('input[name=mode]:checked').value;
-document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',()=>{$('otherBox').hidden=modeSel()!=='inperson';if(!$('otherBox').hidden)other.sz();$('gen').textContent=modeSel()==='inperson'?'Create signed PDF':'Create & get signing link';sync()}));
+const genLabel=()=>modeSel()==='inperson'?(window.scT?scT('btn.createPdf'):'Create signed PDF'):(window.scT?scT('btn.createLink'):'Create & get signing link');
+document.querySelectorAll('input[name=mode]').forEach(r=>r.addEventListener('change',()=>{$('otherBox').hidden=modeSel()!=='inperson';if(!$('otherBox').hidden)other.sz();$('gen').textContent=genLabel();sync()}));
 // restore draft
 try{const d=JSON.parse(localStorage.getItem(DK));if(d&&d.desc){setF(d);$('draftNote').textContent='Restored your unsent draft from '+new Date(d.at).toLocaleString()+'.'}}catch(e){}
 loading=false;sync();hilite();
@@ -152,8 +153,8 @@ function setBusy(on){const b=$('listBusy');if(b)b.hidden=!on}
 async function refresh(cursor){setBusy(true);try{await refreshBody(cursor)}finally{setBusy(false)}}
 async function refreshBody(cursor){if(!acct){$('count').textContent=window.scT?scT('count.none'):'Your first 3 documents are free.';hist([]);showListError('');return}
  const path='/account/me'+(cursor?('?cursor='+encodeURIComponent(cursor)):'');
- const j=await api(path);
- if(j._s===401){localStorage.removeItem(AK);acct=null;return refresh()}
+ let j;try{j=await api(path)}catch(e){showListError(window.scT?scT('list.fail'):'We cannot confirm your documents right now. This is not an empty list.');return}
+ if(j._s===401){localStorage.removeItem(AK);acct=null;state=null;if($('akey'))$('akey').value='';showListError(window.scT?scT('session.rejected'):'This account key was not accepted. This browser is signed out.');$('count').textContent=window.scT?scT('session.signedout'):'Signed out.';hist([]);return}
  if(j._s===503){showListError(window.scT?scT('list.fail'):'We cannot confirm your documents right now. This is not an empty list.');return}
  if(j._s===400){showListError(j.error||(window.scT?scT('list.badpage'):'That page link is not valid.'));return}
  if(j._s===403){showListError(window.scT?scT('list.forbidden'):'This account cannot open that list.');return}
@@ -171,8 +172,9 @@ function applyDocFind(){const input=$('docFind');if(!input)return;const q=input.
 function hist(docs,fresh){fresh=fresh||[];const L=$('history');L.textContent='';if(!docs.length){const p=document.createElement('p');p.className='small';p.textContent=window.scT?scT('list.empty'):'No documents yet.';L.appendChild(p);return}const lk=links();
  docs.forEach(d=>{const c=document.createElement('div');c.className='card hdoc';c.dataset.find=((d.title||'')+' '+(d.client||'')+' '+(d.status||'')+' '+(d.coNo||'')).toLowerCase();c.dataset.status=d.status||'';const open=document.createElement('button');open.type='button';open.className='btn ghost';open.textContent=(d.coNo?'CO #'+d.coNo+' · ':'')+d.title+' – '+d.client;open.addEventListener('click',()=>showDetail(d));c.appendChild(open);
   if(fresh.includes(d.id)){const nb=document.createElement('span');nb.className='badge wait';nb.textContent='NEW';open.appendChild(document.createTextNode(' '));open.appendChild(nb)}
-  const label=window.scT&&['signed','pending','declined','cancelled'].includes(d.status)?scT('status.'+d.status):d.status;
-  const st={signed:['ok',label],pending:['wait',label],declined:['no',label],cancelled:['off',label]}[d.status]||['off',d.status];
+  const known=['signed','pending','declined','cancelled','confirming'];
+  const label=window.scT&&known.includes(d.status)?scT('status.'+d.status):d.status;
+  const st={signed:['ok',label],pending:['wait',label],declined:['no',label],cancelled:['off',label],confirming:['wait',label]}[d.status]||['off',label];
   const bd=document.createElement('span');bd.className='stb '+st[0];bd.textContent=st[1];const s=document.createElement('p');s.className='small';
   const rawAmt=d.total!=null?d.total:d.price;c.dataset.currency=d.currency||'';c.dataset.amount=String(rawAmt==null?'':rawAmt);const shown=window.scFormatMoney?scFormatMoney(Math.abs(Number(rawAmt)||0),d.currency):(d.currency||'')+' '+rawAmt;const sign=Number(rawAmt)<0?'−':Number(rawAmt)>0?'+':'';
   const when=window.scFormatDay?scFormatDay(d.date):d.date;const exp=d.status==='pending'&&d.expires?(window.scFormatDay?scFormatDay(d.expires):d.expires.slice(0,10)):'';
@@ -194,7 +196,7 @@ function hist(docs,fresh){fresh=fresh||[];const L=$('history');L.textContent='';
   const vl=document.createElement('a');vl.href='verify.html?id='+d.id;vl.className='small vlink';vl.textContent='Public verify page';vl.target='_blank';vl.rel='noopener';c.appendChild(vl);
   L.appendChild(c)});applyDocFind();if($('docFind')&&!$('docFind')._wired){$('docFind')._wired=1;$('docFind').addEventListener('input',applyDocFind);if($('docStatus'))$('docStatus').addEventListener('change',applyDocFind);}}
 async function showDetail(d){const box=$('detail');if(!box)return;box.hidden=false;$('history').hidden=true;$('detailTitle').textContent=d.title||'Document';$('detailCrumb').textContent=(d.title||'Document').slice(0,32);$('detailCrumb').title=d.title||'';
- const words={signed:'Signed',pending:'Waiting for signature',declined:'Declined',cancelled:'Cancelled'};$('detailBadge').innerHTML='';const b=document.createElement('span');b.className='badge '+({signed:'ok',pending:'wait',declined:'no',cancelled:'off'}[d.status]||'off');b.textContent=words[d.status]||d.status;$('detailBadge').appendChild(b);
+ const words={signed:'Signed',pending:'Waiting for signature',declined:'Declined',cancelled:'Cancelled',confirming:'Confirming the stored record'};$('detailBadge').innerHTML='';const b=document.createElement('span');b.className='badge '+({signed:'ok',pending:'wait',declined:'no',cancelled:'off',confirming:'wait'}[d.status]||'off');b.textContent=(window.scT&&words[d.status]?scT('status.'+d.status):words[d.status])||d.status;$('detailBadge').appendChild(b);
  $('detailError').textContent='';$('detailBody').textContent='Checking this document…';
  const j=await api('/doc/status?d='+encodeURIComponent(d.id));
  if(j._s===503){$('detailBody').textContent='';$('detailError').textContent='We can’t confirm this document right now.';return}
@@ -227,7 +229,9 @@ function showShare(url,client,id,remind){$('share').hidden=false;$('slink').valu
  $('em').href='mailto:'+encodeURIComponent(to)+'?subject='+encodeURIComponent(remind?'Reminder: please sign our agreed change':'Please sign: agreed change')+'&body='+encodeURIComponent(t);$('share').scrollIntoView({behavior:'smooth'});if(id)watch(id)}
 $('copy').addEventListener('click',()=>{navigator.clipboard.writeText($('slink').value).then(()=>{$('copy').textContent='Copied ✓'})});
 if(navigator.share)$('nshare').hidden=false;$('nshare').addEventListener('click',()=>navigator.share({title:'Please sign',url:$('slink').value}).catch(()=>{}));
-$('gen').addEventListener('click',async()=>{msg('');clearErr();const mode=modeSel(),g=$('gen');const f=read();
+let sentKey='',creating=false;
+function payloadKey(mode,f,tplKey){return mode+'\n'+tplKey+'\n'+JSON.stringify(f)}
+$('gen').addEventListener('click',async()=>{if(creating)return;msg('');clearErr();const mode=modeSel(),g=$('gen');const f=read();
  if(!f.biz)return ferr('biz','Please type your name.');if(!f.client)return ferr('client','Please type the other party\'s name.');
  if(mode==='remote'){if(!f.clientContact)return ferr('clientContact','Add their email or phone so the signing link can reach them.');
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.clientContact)&&(f.clientContact.replace(/\D/g,'').length<6||/[^\d\s+().-]/.test(f.clientContact)))return ferr('clientContact','Use an email (name@example.com) or a phone number.')}
@@ -237,16 +241,20 @@ $('gen').addEventListener('click',async()=>{msg('');clearErr();const mode=modeSe
  if(f.taxRate&&!(/^\d{1,3}([.,]\d{1,3})?$/.test(f.taxRate)&&n(f.taxRate)<=100))return ferr('taxRate','Tax rate should be between 0 and 100.');
  if(f.payTerms==='custom'&&!f.payCustom)return ferr('payCustom','Describe the custom payment terms.');
  if(!me.signed)return ferr('sigMe','Please sign in the "Your signature" box (or tap "Type my name instead").');if(mode==='inperson'&&!other.signed)return ferr('sigOther','The other party must sign in their box.');
- g.disabled=true;g.textContent='Working…';
- try{await ensure();const tplKey=(ts.value||'custom').startsWith('u:')?'custom':(ts.value||'custom');const j=await api('/doc/create',{method:'POST',body:JSON.stringify({v:3,template:tplKey,tz:TZ,fields:f,creatorSig:me.url(),mode,otherSig:mode==='inperson'?other.url():undefined,attachments:photos.length?photos:undefined})});
+ const tplKey=(ts.value||'custom').startsWith('u:')?'custom':(ts.value||'custom');
+ const key=payloadKey(mode,f,tplKey);
+ if(key===sentKey){msg(window.scT?scT('create.same'):'This exact record was already created. Change the form if you need another document.');return}
+ creating=true;g.disabled=true;g.textContent=window.scT?scT('create.working'):'Working…';
+ try{await ensure();const j=await api('/doc/create',{method:'POST',body:JSON.stringify({v:3,template:tplKey,tz:TZ,fields:f,creatorSig:me.url(),mode,otherSig:mode==='inperson'?other.url():undefined,attachments:photos.length?photos:undefined})});
   if(j._s===402){msg(j.message||'Free limit reached.');location.hash='buy'}
   else if(j._s===429){msg(window.scT?scT('limit.fast'):'Too many documents too fast.')}
   else if(j._s===503){msg(window.scT?scT('create.uncertain'):"We can't confirm this document right now.")}
+  else if(j._s===401){localStorage.removeItem(AK);acct=null;if($('akey'))$('akey').value='';msg(window.scT?scT('session.rejected'):'This account key was not accepted. This browser is signed out.')}
   else if(!j.ok){if(j.field&&$(j.field))ferr(j.field,j.error);else msg(j.error||'Something went wrong. Please try again.');if(j.placeholders)hilite()}
-  else{if(window.scTrack)scTrack('doc_created',{method:mode});localStorage.removeItem(DK);photos=[];thumbs();$('draftNote').textContent='';toast('Created CO #'+j.coNo+'.');
+  else{sentKey=key;if(window.scTrack)scTrack('doc_created',{method:mode});localStorage.removeItem(DK);photos=[];thumbs();$('draftNote').textContent='';toast('Created CO #'+j.coNo+'.');
    if(j.signUrl){const l=links();l[j.id]=j.signUrl;localStorage.setItem(LK,JSON.stringify(l));await refresh();showShare(j.signUrl,f.client,j.id)}else{$('share').hidden=true;await dl(j.id);await refresh()}}}
  catch(e){const m=e&&e.message||'';msg(/fetch|network|Failed/i.test(m)||!m?(window.scT?scT('net.draft'):'Network error. Your draft is still on this device.'):m)}
- g.disabled=false;g.textContent=mode==='inperson'?'Create signed PDF':'Create & get signing link'});
+ creating=false;g.disabled=false;g.textContent=genLabel()});
 // ---- payments (PayPal hosted checkout; card data never touches this site) ----
 function pay(kind){if(!acct)return;const fm=document.createElement('form');fm.method='post';fm.action='https://www.paypal.com/cgi-bin/webscr';fm.target='_top';
  const base={business:'termschange@gmail.com',currency_code:'USD',no_shipping:'1',no_note:'1',custom:acct.id,notify_url:API+'/ipn',return:SITE+'/app.html?paid=1',cancel_return:SITE+'/app.html#buy',rm:'1',cbt:'Return to SignedChange'};
@@ -307,5 +315,5 @@ $('usekey').addEventListener('click',async()=>{const v=$('newkey').value.trim(),
   rmsg('Payment not confirmed yet. If you paid, wait a few minutes and reload, or use "Restore Pro" with your PayPal transaction ID.')}
  else{await refresh();const sid=localStorage.getItem(SK);if(sid&&state&&!state.pro)await claimSub(sid,1).catch(()=>{})}}catch(e){}})();
 window.SC_TPL=TPL;
-if(window.scOnLang)scOnLang(()=>{fillTpls();if(state&&state.docs)hist(state.docs)});
+if(window.scOnLang)scOnLang(()=>{fillTpls();if($('gen')&&!$('gen').disabled)$('gen').textContent=genLabel();if(state&&state.docs)hist(state.docs)});
 })();

@@ -43,13 +43,14 @@
     const to = displayCode();
     if (!from) return '';
     if (!rates) return '';
-    if (!rates.ok && rates.stale) return 'The saved exchange rate is too old to show' + (rates.date ? ' (ECB date ' + rates.date + ')' : '') + '. The agreement stays ' + from + ' ' + amount + '.';
-    if (!rates.ok) return 'Exchange rates are unavailable. The agreement stays ' + from + ' ' + amount + '.';
-    if (to === from) return 'Shown in the agreement currency (' + from + '). Rate date ' + rates.date + '.';
+    const tx = (key, fallback, vars) => window.scT ? scT(key, vars) : fallback;
+    if (!rates.ok && rates.stale) return tx('fx.stale', 'The saved exchange rate is too old to show' + (rates.date ? ' (ECB date ' + rates.date + ')' : '') + '. The agreement stays ' + from + ' ' + amount + '.', { note: rates.date ? ' (ECB date ' + rates.date + ')' : '', currency: from, amount: amount });
+    if (!rates.ok) return tx('fx.down', 'Exchange rates are unavailable. The agreement stays ' + from + ' ' + amount + '.', { currency: from, amount: amount });
+    if (to === from) return tx('fx.same', 'Shown in the agreement currency (' + from + '). Rate date ' + rates.date + '.', { currency: from, date: rates.date || '' });
     const value = convert(amount, from, to);
-    if (value == null) return 'No conversion is currently available for ' + to + '. Nothing was converted. The agreement stays ' + from + ' ' + amount + '.';
+    if (value == null) return tx('fx.none', 'No conversion is currently available for ' + to + '. Nothing was converted. The agreement stays ' + from + ' ' + amount + '.', { to: to, currency: from, amount: amount });
     const peg = rates.pegs && rates.pegs[to] ? ' ' + rates.pegs[to] : '';
-    return 'About ' + money(value, to) + ' as of ' + rates.date + '. Approximate. ' + (rates.source || '') + '.' + peg + ' The agreement stays ' + from + ' ' + amount + '.';
+    return tx('fx.about', 'About ' + money(value, to) + ' as of ' + rates.date + '. Approximate. ' + (rates.source || '') + '.' + peg + ' The agreement stays ' + from + ' ' + amount + '.', { value: money(value, to), date: rates.date || '', source: rates.source || '', peg: peg, currency: from, amount: amount });
   }
 
   function paintForm() {
